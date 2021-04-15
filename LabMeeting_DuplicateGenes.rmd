@@ -1,0 +1,711 @@
+---
+title: Duplicate gene fate in S. cerevisiae is shaped by the the combined effects
+  of chromatin structure and the genomic environment
+author: "Christoforos Nikolaou"
+date: "2/11/2021"
+output:
+  slidy_presentation: default
+  beamer_presentation: default
+  ioslides_presentation: default
+subtitle: LabMeeting_Feb16_2020
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+```{r, echo=F, eval=T, message=F}
+library(partykit)
+library(gplots)
+library(rpart)
+library(MASS)
+library(stats)
+library(randomForest)
+library(ggfortify)
+library(ggplot2)
+library(RColorBrewer)
+library(heatmap.plus)
+library(arules)
+library(arulesViz)
+library(knitr)
+library(gProfileR)
+library(multcomp)
+library(NbClust)
+library(beanplot)
+library(ggpubr)
+library(gprofiler2)
+```
+
+```{r, echo=F, eval=T, message=F}
+# Header line depending on computer used
+# Ubuntu computers
+setwd("~")
+# Windows laptop
+#setwd("C:/Users/chris")
+# general yeast gene data
+chromosomes<-read.table("Dropbox/Data/yeast_interactions_noble/saccer2_R.genome")[,1:4]
+chromsizes<-read.delim("Dropbox/Data/SGD/sacCer2.genome", header=F, sep="\t")
+colnames(chromsizes)<-c("chr", "chromsize")
+chromsizes <- chromsizes[-6,] # removing chrM
+chromsizes$chr<-factor(chromsizes$chr)
+chromsizes <- chromsizes[c(1,2,3,4,6,7,8,9,5,10,11,12,13,14,15,16),] # reordering
+#
+coords<-read.delim("Dropbox/Data/gene_coordinates/saccer2_refseq_genes_TSS_TTS.bed", header=F, sep="\t")
+colnames(coords)<-c("chr", "TSS", "TTS", "Gene", ".", "strand")
+allyeastgenesprops<-read.delim("Dropbox/Data/SGD/saccer2_refseq_genes_TSS_TTS_scaleddist_telomere_centromere_distARS_phcons_zscoreofSDSPELL_clusterACS_pughTSS.bed", header=F, sep="\t")
+colnames(allyeastgenesprops)[1:12]<-c("chr", "start", "end", "gene", "x", "strand", "teldist", "centdist", "arsdist", "phcons", "trnoise", "clusteracs")
+essential<-read.table("Dropbox/Data/YeastGeneLists/essential.genes")[,1]
+nonessential<-read.table("Dropbox/Data/YeastGeneLists/non_essential.genes")[,1]
+highfreq<-read.table("Dropbox/Data/YeastGeneLists/high_freq_expr.genes")[,1]
+lowfreq<-read.table("Dropbox/Data/YeastGeneLists/low_freq_expr.genes")[,1]
+tata<-read.table("Dropbox/Data/YeastGeneLists/tata.genes")[,1]
+tataless<-read.table("Dropbox/Data/YeastGeneLists/tata_less.genes")[,1]
+# Most updated dataset
+completedata<-read.delim("Dropbox/Articles/Under_Prep/GeneSocializationYeast/Duplicate_Genes_Full_file_1054_pairs_new.tsv", header=T, sep="\t")
+completedata$meanDomACS<-(completedata$N1_mACS+completedata$N2_mACS)/2
+###
+fdata<-read.delim("Dropbox/Articles/Under_Prep/GeneSocializationYeast/MKalyva_Duplicated_genes2019_ACS.tsv", header=T, sep="\t")
+#
+gedup<-read.delim("Dropbox/Articles/Under_Prep/GeneSocializationYeast/GeneDup_New_Analysis_full_info.tsv", header=T, sep="\t")
+#
+tfconsdup<-read.delim("Dropbox/Articles/Under_Prep/GeneSocializationYeast/GeneDup_New_Analysis_TF_Cons.tsv", header=T, sep="\t")
+ntf1<-0;for(i in 1:length(tfconsdup[,1])){ntf1[i]<-length(strsplit(as.character(tfconsdup$Gene1TF[i]), ",")[[1]])}
+ntf2<-0;for(i in 1:length(tfconsdup[,1])){ntf2[i]<-length(strsplit(as.character(tfconsdup$Gene2TF[i]), ",")[[1]])}
+tfconsdup<-data.frame(tfconsdup, Gene1TFno=ntf1, Gene2TFno=ntf2)
+# Total TF data
+tfdata<-read.delim("Dropbox/Data/Yeast_RegCode/sacCer2_Promoters_min300_plus_100_vs_Harbison_RegCode.bed", header=F, sep="\t")
+colnames(tfdata)<-c("chrom", "start", "end", "Gene", "TFno", "TFlist")
+# SUPPORTING DATA
+# Synteny
+synteny<-read.delim("Dropbox/Articles/Under_Prep/GeneSocializationYeast/YGOBSyntenyScores.tsv", header=T, sep="\t")
+# Gene coordinates
+ssdgenes<-read.delim("Dropbox/Data/SGD/geneParalogs/SSD_genes.bed", header=F, sep="\t")
+wgdgenes<-read.delim("Dropbox/Data/SGD/geneParalogs/WGD_genes.bed", header=F, sep="\t")
+# Other data
+coddens<-read.delim("Dropbox/Data/SGD/gene_neighborhoods_10k_codCov.bed", header=F, sep="\t")
+colnames(coddens)<-c("chr", "start", "end", "Gene", "CodDens")
+phconsclust<-read.delim("Dropbox/Data/SGD/All_sacCer2_genes_phCons.bwsum.clusters", header=F, sep="\t")
+colnames(phconsclust)<-c("chr", "start", "end", "NoGenes", "Genes", "MeanPhCons", "values")
+# Tirosh 
+exprCons<-read.delim("Dropbox/Data/SGD/TiroshBarkai2007_expressionConservationdata.tsv", header=T, sep="\t")
+# Constanzo (Genetic Interactions)
+genInter<-read.delim("Dropbox/Data/SGD/sgadata_costanzo2009_lenientCutoff_101120.txt", header=T, sep="\t")
+# Nucleosome Data
+nucposkaplanTSS<-read.delim("Dropbox/Data/SGD/all_gene_profiles/all_genes_kaplan_sacCer1_avg_occ_norm_TSS.bwsum", header=F, sep="\t")
+nucposPughTSS<-read.delim("Dropbox/Data/SGD/all_gene_profiles/all_genes_Pugh_Lab_nucleosomes_TSS.bwsum", header=F, sep="\t")
+symCurvTSS<-read.delim("Dropbox/Data/SGD/all_gene_profiles/all_genes_yeast_genome_symcurv_TSS.bwsum", header=F, sep="\t")
+# Histone Modifications
+allyeasthismod<-read.delim("Dropbox/Data/SGD/all_gene_profiles/all_genes_washuniv_hismod_normalized_promoter_regions.tsv", header=T, sep="\t")
+# Constraints in Sequence and Structure
+seqconsTSS<-read.delim("Dropbox/Data/SGD/SC_Robustness/saccer2_refseq_genes_TSS_plusmin500_phCons.bwsum", header=F, sep="\t")
+strconsTSS<-read.delim("Dropbox/Data/SGD/SC_Robustness/saccer2_refseq_genes_TSS_plusmin500_scRob.bwsum", header=F, sep="\t")
+mutasomeTSS<-read.delim("Dropbox/Data/SGD/SC_Robustness/saccer2_refseq_genes_TSS_plusmin500_mutasome.bwsum", header=F, sep="\t")
+# Gene spacers
+spacers<-read.delim("Dropbox/Data/SGD/sacCer2_genes_spacers_length.tsv", header=T, sep="\t")
+# Regulation
+treg<-read.delim("Dropbox/Data/Yeast_RegCode/sacCer2_RefSeq_Genes_min500plus500_TSS_vs_Harbison_RegCode.tsv", header=F, sep="\t")
+# ACS Gene Coexpression
+rollingacs<-read.delim("Dropbox/Articles/Under_Prep/GeneSocializationYeast/sacCer2_rollingACS.bed", header=F, sep="\t")
+colnames(rollingacs)<-c("chr", "start", "end", "Gene", "NoGenes", "Val1", "Val2", "meanACS")
+# Replication Timing
+reptiming<-read.delim("Dropbox/Articles/Under_Prep/GeneSocializationYeast/sacCer2_RepTiming.bed", header=F, sep="\t")
+colnames(reptiming)<-c("chr", "start", "end", "gene", "repTime")
+# 3D coordinates
+space3d<-read.delim("Dropbox/Data/SGD/YeastGenePositions3D_Duan.tsv")
+# Gene Names
+allyeastgenes<-allyeasthismod$Accession
+ssd<-ssdgenes[,5]
+wgd<-wgdgenes[,5]
+duplicates<-as.factor(union(ssd, wgd))
+'%notIn%'<-Negate('%in%')
+singletons<-allyeastgenes[(allyeastgenes %notIn% duplicates)]
+# 3D interactions
+# Networks created with the use of:
+# while read gene; do grep -P "\t$gene\t" sacCer2_allgenes_mapped_on_total_interactions_Duan.bed; done  < geneParalogs/Singletons1100Sample.genes | gawk '{val[$4]++; val[$8]++}END{for (i in val) {print i"\t"val[i]}}' | sort -rnk2 > singletons1100.net
+# in Dropbox/Data/SGD
+# Read 3D gene network datafiles (number of gene interactions in 3D)
+#totalnet<-read.delim("Dropbox/Data/SGD/sacCer2_allgenes_mapped_on_total_interactions_Duan.bed", header=F, sep="\t")
+ssdnet<-read.table("Dropbox/Data/SGD/ssd.net")
+wgdnet<-read.table("Dropbox/Data/SGD/wgd.net")
+singAnet<-read.table("Dropbox/Data/SGD/singletons.net")
+singTnet<-read.table("Dropbox/Data/SGD/singletons1100.net") # random 1100 singletons
+# clusters of genes
+ssdmerged<-read.delim("Dropbox/Articles/Under_Prep/GeneSocializationYeast/ssd10kmerged.bed", header=F, sep="\t");ssdmerged<-data.frame(ssdmerged, 1)
+wgdmerged<-read.delim("Dropbox/Articles/Under_Prep/GeneSocializationYeast/wgd10kmerged.bed", header=F, sep="\t");wgdmerged<-data.frame(wgdmerged, 1)
+# PFAM domains
+saccer2pfam<-read.delim("Dropbox/Data/Pfam/all_yeast_proteins_PfamScan.bed", header=F, sep="\t")
+colnames(saccer2pfam)<-c("chr", "start", "end", "gene", ".", "strand", "teldist", "centdist", "arsdist", "phcons", "trnoise", "clusteracs", "GeneName", "AlStart","AlEnd","EnvStart","EnvEnd","HMMAcc","HMMName","Type", "HMMStart", "HMMEND", "HMMLength", "BitScore", "E.value", "Significance", "Clan")
+```
+
+# Introduction
+
+* Gene duplication is one of the major processes driving the innovation in complex genomes. 
+![Kellis et al, Nature 2004](Dropbox/Talks/LabPresentations/DuplicateGenes/Kellis_2004_YeastGeneDuplications.png)
+
+# The fate of the duplicated copies varies:
+  1. The great majority rapidly accumulate mutations and fossilize in pseudogenes that quickly become indistinguishable from the background non-coding genomic regions (erosion). 
+  2. A small percentage of cases develop a more specialized functional role, becoming expressed in different cellular compartments or contexts (subfunctionalization), 
+  3. Another subset acquires a different function altogether (neofunctionalization).
+  
+![Kuzmin et al, Science 2020](Dropbox/Talks/LabPresentations/DuplicateGenes/Kuzmin_2020_gene_duplication_fate.png)
+
+# What we know #1
+
+* Yeast has undergone at least one such genome-wide event, which was followed by a massive purge of duplicate/redundant genes.
+* There are two types of gene duplicates in yeast. Genes originating from whole-genome duplication (WGD, Ohnologs) and genes originating from small-scale duplication (SSD, paralogs).
+* According to published works there are 545 Ohnolog and 509 paralog pairs in the yeast genome. Thus ~1/3 of the yeast genes are products of gene duplication. 
+
+
+# What we know #2
+
+* There are differences in the divergence rates with SSD (paralogs) being more diverged and accumulating more SNPs than Ohnologs.
+* SSDs have greater expression variability
+* Paralogs are more enriched in essential genes. 
+* Paralogs have more protein interactions but Ohnologs are over-represented in protein complexes
+* Overall, genes that have been part of a whole-genome duplication and genes that are the result of small-scale duplications show **distinct functional, regulatory and evolutionary properties** 
+
+# Goals
+
+* To investigate the parameters that can explain the three alternative fates (erosion, sub- and neo-functionalization)
+* Most of the anayses in this respect treat the two daughter genes as linked or entangled from their birth through an “invisible thread” regardless of their genomic context. 
+* We want to investigate the degree to which the "genomic context", i.e. the genomic environment, in which a gene is embedded may shape the fate of the duplicate gene pair.
+
+# The biological question(s)
+
+* To what extent is the evolutionary and/or functional divergence of the duplicate gene pair dependent on:
+  1. The position of the duplicate pair (or one of the pair's genes) on the linear chromosomes (spatial constraints)
+  2. The properties of genes in their immediate proximity (gene "socialization")
+  3. The underlying DNA compositional, structural and chromatin characteristics (structural environment)
+
+# Results #1: Spatial Constraints 
+* SSDs (paralogs) tend to be found closer to each other in the linear chromosomes (expected). 
+```{r, echo=F, eval=T, message=F, warning=F}
+my_comparisons <- list(c("SSD", "WGD"))
+bplot<-ggboxplot(completedata, x = "Type", y = "dist", fill = "Type", title="Linear distance on same chromosome", palette = c("firebrick4",  "steelblue4"))+ stat_compare_means()
+bplot
+```
+
+# Adding random singleton-pairs
+```{r}
+df<-data.frame("dist"=completedata$dist, "Type"=completedata$Type)
+coords1<-coords[which(coords$V4 %in% singletons),]; 
+for(i in 1:length(coords1[,1])){x<-coords1[sample(length(coords1[,1]), 2),]; if (x[1,1]==x[2,1]) {a<-rbind(a, abs(x[1,2]-x[2,2]))}}
+df1<-data.frame("dist"=a, "Type"="singleton")
+df2<-rbind(df,df1)
+as.factor(df2$Type)->df2$Type
+my_comparisons <- list(c("SSD", "WGD"),  c("singleton", "SSD"), c("singleton", "WGD"))
+bplot<-ggboxplot(df2, x = "Type", y = "dist", fill = "Type", title="Linear distance on same chromosome", palette = c("firebrick4", "olivedrab",  "steelblue4"))+ stat_compare_means() 
+bplot
+
+```
+
+
+# Results #1: Spatial Constraints 
+* Ohnologs tend to be found on different chromosomes (perhaps also expected)
+```{r, echo=F, eval=T, message=F}
+sameChrom<-completedata$dist
+sameChrom[which(!is.na(sameChrom))]<-"SAME"
+sameChrom[which(is.na(sameChrom))]<-"DIFFERENT"
+table(completedata$Type,sameChrom)
+fisher.test(table(completedata$Type,sameChrom))
+```
+
+# Results #1: Spatial Constraints 
+* For genes in the same chromosome, physical distance is *not* significantly correlated with divergence
+```{r, echo=F, eval=T, message=F}
+test<-data.frame(Type=completedata$Type, Divergence=completedata$Distance_a_b_corrected, ChromDist=sameChrom)
+aggregate(test$Divergence, by=list(Type=test$Type, PhysDist=test$ChromDist), FUN=function(x){mean(x, na.rm=T)})
+```
+
+# Results #1: Spatial Constraints 
+* SSDs (paralogs) are over-represented towards the chromosomal edges of the yeast genome in contrast to the more centrally positioned Ohnologs. 
+* This preference cannot be attributed to the evolutionary divergence, as there is no significant correlation between distance from the chromosomal end and scaled gene pair divergence (cc=0.045, p=0.416).
+
+```{r, echo=F, eval=T, message=F, warning=F}
+completedata$MeanTelDist<-(completedata$TelDist1+completedata$TelDist2)/2
+my_comparisons <- list(c("SSD", "WGD"))
+bplot<-ggboxplot(completedata, x = "Type", y = "MeanTelDist", fill = "Type", title="Mean Pair Distance from Chromosomal Edge", palette = c("firebrick4",  "steelblue4"))+ stat_compare_means()
+bplot
+```
+
+# Results #1: SSD/WGD gene clusters are located in distinct areas of the genome
+```{r, echo=F, eval=T, message=F, warning=F}
+source("~/Dropbox/Programs/R_functions/yeastgenomeplot.R")
+par(mfrow=c(1,2))
+yeast.genome.plot(chromosomes, ssdmerged, "Paralogs", "white", "steelblue4")
+yeast.genome.plot(chromosomes, wgdmerged, "Ohnologs", "white", "firebrick4")
+```
+
+
+# Results #1: Gene spacing and directionality
+* SSD genes are positioned in more "open" genomic space compared to Ohnologs and singletons. These may be explained by their increased preference for the chromosomal edges.
+
+```{r, echo=F, eval=T, warning=F, message=F}
+spacers$meanSpacer<-(spacers$gene_up+spacers$gene_down)/2
+library(beanplot)
+beanplot(spacers$meanSpacer[which(spacers$genes %in% singletons)],spacers$meanSpacer[which(spacers$genes %in% ssd)],spacers$meanSpacer[which(spacers$genes %in% wgd)], what=c(1,1,1,0), col="olivedrab", names=c("Singletons", "Paralogs", "Ohnologs"), main="Mean Up/DownStream Spacer Length") 
+t.test(spacers$meanSpacer[which(spacers$genes %in% singletons)],spacers$meanSpacer[which(spacers$genes %in% ssd)])
+t.test(spacers$meanSpacer[which(spacers$genes %in% singletons)],spacers$meanSpacer[which(spacers$genes %in% wgd)])
+```
+
+# Results #1: Gene spacing and directionality
+* The differences are even more expressed when looking at the gene lengths. Both types of duplicates are significantly longer than singletons. This is probably owed to the greatest complexity of their sequences which allows them to sub/neo-functionalize.
+* Differences are also singnificant between paralogs and Ohnologs, with the first being considerably longer. 
+
+```{r, echo=F, eval=T, warning=F, message=F}
+
+beanplot(spacers$length[which(spacers$genes %in% singletons)],spacers$length[which(spacers$genes %in% ssd)],spacers$length[which(spacers$genes %in% wgd)], what=c(1,1,1,0), col="steelblue4", names=c("Singletons", "Paralogs", "Ohnologs"), main="Gene Length") 
+
+# lengths
+t.test(spacers$length[which(spacers$genes %in% singletons)],spacers$length[which(spacers$genes %in% ssd)])
+
+t.test(spacers$length[which(spacers$genes %in% singletons)],spacers$length[which(spacers$genes %in% wgd)])
+
+t.test(spacers$length[which(spacers$genes %in% ssd)], spacers$length[which(spacers$genes %in% wgd)])
+```
+
+# Results #1: Gene spacing and directionality
+* Both paralogs and Ohnologs tend to be preferentially positioned between colinear genes (-,+,- or +,-,+) compared to singletons.
+
+```{r, echo=F, eval=T, warning=F, message=F}
+# singletons
+x<-which(coords$Gene %in% singletons)
+x<-sort(c(x-1, x, x+1))
+chrmat<-matrix(coords$chr[x], ncol=3, byrow = T)
+strmat<-matrix(coords$strand[x], ncol=3, byrow = T)
+strmat[apply(chrmat, 1, function(x) length(unique(x)) == 1),]->strmat2
+singdirtab<-table(apply(strmat2, 1, paste, collapse=""))
+# ssd
+x<-which(coords$Gene %in% ssd)
+x<-sort(c(x-1, x, x+1))
+chrmat<-matrix(coords$chr[x], ncol=3, byrow = T)
+strmat<-matrix(coords$strand[x], ncol=3, byrow = T)
+strmat[apply(chrmat, 1, function(x) length(unique(x)) == 1),]->strmat2
+ssddirtab<-table(apply(strmat2, 1, paste, collapse=""))
+# wgd
+x<-which(coords$Gene %in% wgd)
+x<-sort(c(x-1, x, x+1))
+chrmat<-matrix(coords$chr[x], ncol=3, byrow = T)
+strmat<-matrix(coords$strand[x], ncol=3, byrow = T)
+strmat[apply(chrmat, 1, function(x) length(unique(x)) == 1),]->strmat2
+wgddirtab<-table(apply(strmat2, 1, paste, collapse=""))
+#
+# Odds Ratios
+(ssddirtab/sum(ssddirtab))/(singdirtab/sum(singdirtab))
+(wgddirtab/sum(wgddirtab))/(singdirtab/sum(singdirtab))
+```
+
+
+# Results #2: Spatial/Chromatin Constraints 
+* We have partitioned the yeast genome in domains of consistent chromating patterns around the genes TSS.
+![Nikolaou, Current Genetics 2018](Dropbox/Talks/LabPresentations/DuplicateGenes/Nikolaou_2018_NucDomains.png)
+
+# Results #2: Spatial/Chromatin Constraints 
+* When attempting to identify preferences of gene duplicates in particular "chromatin states" we find only a few and these are probably confounded by the paralog preference for the subtelomeric regions.
+
+|                                     | SSD        |         | WGD        |         | All        |         |
+|-------------------------------------|------------|---------|------------|---------|------------|---------|
+|                                     | Enrichment | P-value | Enrichment | P-value | Enrichment | P-value |
+| Cluster 1 Open NFR Long             | 0.964      | 0.222   | 1.030      | 0.297   | 1.023      | 0.194   |
+| Cluster 2 Open NFR Short            | 1.023      | 0.389   | 1.061      | 0.182   | 0.990      | 0.348   |
+| Cluster 3 Open NFR Late Replicating | 1.134      | 0.158   | 1.146      | 0.142   | 1.008      | 0.466   |
+| Cluster 4 Very Open NFR, Conserved  | 0.903      | 0.200   | 1.166      | 0.082   | 1.042      | 0.250   |
+| Cluster 5 Repressed Occupied        | 0.976      | 0.426   | 0.935      | 0.240   | 0.974      | 0.302   |
+| Cluster 6 Subtelomeric              | 2.028      | 0.006   | 0          | N/A     | 0.636      | 0.024   |
+| Boundaries                          | 1.076      | 0.244   | 0.824      | 0.027   | 0.965      | 0.185   |
+
+# Results #2.1: 3D interactions
+* We see NO differences in 3D interactions between paralogs/ohnologs and a random selection of singletons
+
+```{r}
+# Read Networks
+par(mfrow=c(1,2))
+#
+plot(log10(1:length(singAnet[,2])), log10(singAnet[,2]), col="dark grey", pch=19, las=1, xlab="log10(rank)", ylab="log10(interactions)", cex.lab=1.4, cex.axis=1.2, cex.main=2, main="Total Interactions");lines(log10(1:length(singTnet[,2])),log10(singTnet[,2]), col="black", pch=19, type="p");lines(log10(1:length(wgdnet[,2])),log10(wgdnet[,2]), col="dark red", pch=19, type="p");lines(log10(1:length(ssdnet[,2])),log10(ssdnet[,2]), col="dark blue", pch=19, type="p");legend("bottomleft", c("All Singletons", "1100 Random Singletons", "1090 Ohnologs", "1032 Paralogs"), fill=c("dark grey", "black", "dark red", "dark blue"), bty="n", cex=1.2)
+#
+singletonsSample<-read.table("Dropbox/Data/SGD/geneParalogs/Singletons1100Sample.genes")[,1]
+#
+singA2net<-singAnet[which(singAnet[,1] %in% singletons),]
+singT2net<-singTnet[which(singTnet[,1] %in% singletonsSample),]
+wgd2net<-wgdnet[which(wgdnet[,1] %in% wgd),]
+ssd2net<-ssdnet[which(ssdnet[,1] %in% ssd),]
+#
+plot(log10(1:length(singA2net[,2])), log10(singA2net[,2]), col="dark grey", pch=19, las=1, xlab="log10(rank)", ylab="log10(interactions)", cex.lab=1.4, cex.axis=1.2, cex.main=2, main="Within Group Interactions");lines(log10(1:length(singT2net[,2])),log10(singT2net[,2]), col="black", pch=19, type="p");lines(log10(1:length(wgd2net[,2])),log10(wgd2net[,2]), col="dark red", pch=19, type="p");lines(log10(1:length(ssd2net[,2])),log10(ssd2net[,2]), col="dark blue", pch=19, type="p");legend("bottomleft", c("All Singletons", "1100 Random Singletons", "1090 Ohnologs", "1032 Paralogs"), fill=c("dark grey", "black", "dark red", "dark blue"), bty="n", cex=1.2)
+```
+
+# Results #3: Nucleosome Positioning/Structural Attributes
+* Duplicate gene promoters have markedly different chromatin structure at the level of nucleosome positioning.
+* Both types of duplicates have broader and more "shallow" nucleosome free-regions in the promoters, which is suggestive of a more complex regulation. 
+```{r, echo=F, eval=T, message=F, warning=F}
+aggrmeans<-function(genelist, df, columnin, columnsout){
+  i<-which(df[,columnin] %in% genelist)
+  aggrmeans<-colMeans(df[i,columnsout], na.rm=T)
+  return(aggrmeans)
+}
+dataset<-nucposPughTSS
+ssdnuc<-aggrmeans(ssd, dataset, 1, 2:101)
+wgdnuc<-aggrmeans(wgd, dataset, 1, 2:101)
+singletnuc<-aggrmeans(singletons[sample(length(singletons), 1000, replace = F)], dataset, 1, 2:101)
+#
+x<-seq(-495, 495, by=10)
+plot(x, singletnuc, type="l", col="dark grey", lwd=5, xlab="Distance from TSS", ylab="Nucleosome Occupancy", las=1,  main="Experimental Nucleosome Occupancy", cex.lab=1.3, cex.axis=1.2, cex.main=1.5)
+lines(x, ssdnuc, type="l", col="firebrick4", lwd=5, xlab="Distance from TSS", ylab="Nucleosome Occupancy", las=1, ylim=c(0.55, 0.95))
+lines(x, wgdnuc, type="l", col="steelblue4", lwd=5, xlab="Distance from TSS", ylab="Nucleosome Occupancy", las=1)
+legend("bottomright", c("Singletons", "Paralogs", "Ohnologs"), fill=c( "dark grey","firebrick4", "steelblue4"), bty="n")
+```
+
+```{r, echo=F, eval=F, message=F, warning=F}
+aggrmeans<-function(genelist, df, columnin, columnsout){
+  i<-which(df[,columnin] %in% genelist)
+  aggrmeans<-apply(df[i,columnsout], 2, function(x){mean(x, trim=0.05, na.rm=T)})
+  return(aggrmeans)
+}
+dataset<-symCurvTSS
+ssdnuc<-aggrmeans(ssd, dataset, 1, 2:101)
+wgdnuc<-aggrmeans(wgd, dataset, 1, 2:101)
+singletnuc<-aggrmeans(singletons, dataset, 1, 2:101)
+#
+x<-seq(-495, 495, by=10)
+plot(x, scale(singletnuc), type="l", col="dark grey", lwd=5, xlab="Distance from TSS", ylab="Nucleosome Occupancy", las=1,  main="Predicted Nucleosome Occupancy", cex.lab=1.3, cex.axis=1.2, cex.main=2)
+lines(x, scale(ssdnuc), type="l", col="firebrick4", lwd=5, xlab="Distance from TSS", ylab="Nucleosome Occupancy", las=1, ylim=c(0.55, 0.95))
+lines(x, scale(wgdnuc), type="l", col="steelblue4", lwd=5, xlab="Distance from TSS", ylab="Nucleosome Occupancy", las=1)
+legend("bottomright", c("Singletons", "Paralogs", "Ohnologs"), fill=c( "dark grey","firebrick4", "steelblue4"), bty="n")
+```
+
+# Results #3: Chromatin and Structural Constraints in SSDs/WGDs
+
+* SSDs (paralogs) are over-represented in closed chromatin regions (which are themselves enriched at the edges of chromosomes)
+* This may reflect various underlying preferences/biases. Genes at the edges of chromosomes tend to have more shallow NFRs.
+
+
+# Results #3: Chromatin and Structural Constraints in SSDs/WGDs
+* In the past we have employed a method to quantify the structural constraint in genomic sequences as the robustness of nucleosome positioning occupancy (Nikolaou et al. Epigenetics and Chromatin, 2010).
+* A recent work by Ruthier et al. (Genome Res, 2020) has suggested a similar approach using Deep Learning.
+* We applied both models on the promoters of SSD/WGD genes and compared them with singletons.
+
+# Results #3: Chromatin and Structural Constraints in SSDs/WGDs
+* Structural constraints are found to be more pronounced in singletons towards the TSS. 
+* For duplicate genes, small scale paralogs appear to be more similar to singletons. 
+* Ohnologs have more relaxed constraints which are however extended farther upstream compared to singletons.
+* Both types of duplicates show broader constrained regions, suggestive of more extended promoters. 
+```{r}
+aggrmeans<-function(genelist, df, columnin, columnsout){
+  i<-which(df[,columnin] %in% genelist)
+  aggrmeans<-apply(df[i,columnsout], 2, function(x){mean(x, trim=0.05, na.rm=T)})
+  return(aggrmeans)
+}
+dataset<-mutasomeTSS
+ssdnuc<-aggrmeans(ssd, dataset, 2, 3:102)
+wgdnuc<-aggrmeans(wgd, dataset, 2, 3:102)
+singletnuc<-aggrmeans(singletons, dataset, 2, 3:102)
+#
+x<-seq(-495, 495, by=10)
+plot(x, ssdnuc, type="l", col="firebrick4", lwd=5, xlab="Distance from TSS", ylab="Average Score", main="Structural Constraints", las=1, cex.lab=1.3, cex.axis=1.2, cex.main=2)
+lines(x, wgdnuc, type="l", col="steelblue4", lwd=5, xlab="Distance from TSS", ylab="Nucleosome Occupancy", las=1)
+lines(x, singletnuc, type="l", col="dark grey", lwd=5, xlab="Distance from TSS", ylab="Nucleosome Occupancy", las=1)
+legend("topright", c("Singletons", "Paralogs", "Ohnologs"), fill=c( "dark grey","firebrick4", "steelblue4"), bty="n")
+```
+
+# Results #4: Different Regulatory constraints
+* We checked for transcription factor occupancy (in general) by comparing the density of binding sites of any given TF in the same gene upstream regions for the three types of genes.
+* Results show that TF occupancy is very well correlated with the structural constraints.
+```{r, echo=F, eval=T, message=F, warning=F}
+aggrmeans<-function(genelist, df, columnin, columnsout){
+  i<-which(df[,columnin] %in% genelist)
+  aggrmeans<-apply(df[i,columnsout], 2, function(x){mean(x, trim=0.05, na.rm=T)})
+  return(aggrmeans)
+}
+dataset<-treg
+ssdnuc<-aggrmeans(ssd, dataset, 1, 2:51)
+wgdnuc<-aggrmeans(wgd, dataset, 1, 2:51)
+singletnuc<-aggrmeans(singletons, dataset, 1, 2:51)
+#
+x<-seq(-495, -5, by=10)
+plot(x, scale(singletnuc), type="l", col="dark grey", lwd=5, xlab="Distance from TSS", ylab="Mean TFBS Density", las=1,  main="Transcription Factor Occupancy", cex.lab=1.3, cex.axis=1.2, cex.main=2)
+lines(x, scale(ssdnuc), type="l", col="firebrick4", lwd=5, xlab="Distance from TSS", las=1)
+lines(x, scale(wgdnuc), type="l", col="steelblue4", lwd=5, xlab="Distance from TSS", las=1)
+legend("topleft", c("Singletons", "Paralogs", "Ohnologs"), fill=c( "dark grey","firebrick4", "steelblue4"), bty="n")
+```
+
+# Results #4: Transcription Factor Repertoire 
+* Up to now we have seen that duplicate genes tend to have a more complex potential for regulation. In order to gain additional insight in particular preferences we employed an association rule analysis of TF-binding
+* We obtained groups singleton, paralogs and Ohnolog genes and applied a "market basket" analyses to examine co-occurrence of TFs in their promoters, aiming to discover the different regulatory subnetworks governing their expression
+
+# Results #4: Association Rules, Singletons
+
+![Sigletons TF Association Rules](Dropbox/Articles/Under_Prep/GeneSocializationYeast/ARules_NonDupgenes_graph2.png){width=30%}
+
+
+# Results #4: Association Rules, Paralogs
+
+![Paralogs TF Association Rules](Dropbox/Articles/Under_Prep/GeneSocializationYeast/ARules_SSDgenes_graph.png){width=30%}
+
+
+# Results #4: Association Rules, Ohnologs
+
+![Ohnolgs TF Association Rules](Dropbox/Articles/Under_Prep/GeneSocializationYeast/ARules_WGDgenes_graph.png){width=30%}
+
+# Results #4: Transcriptional repertoire
+* It appears that the Ohnologs have greater similarity with the singletons, even though parts of the network are distinct.
+* I haven't had the chance to look at what these TF have in particular. 
+* We will also need to look at the possibility of constructing bigger networks
+
+```{r}
+unlist(tfdata$TFlist[which(tfdata$Gene %in% telgenes)])->temp; strsplit(paste(temp[which(temp!=".")], collapse=","), ",")[[1]]->telgenesTFs
+#
+unlist(tfdata$TFlist[which(tfdata$Gene %in% centgenes)])->temp; strsplit(paste(temp[which(temp!=".")], collapse=","), ",")[[1]]->centgenesTFs
+#
+telgenesTFsT<-table(telgenesTFs)/length(telgenesTFs)
+centgenesTFsT<-table(centgenesTFs)/length(centgenesTFs)
+#
+intersect(centgenesTFs, telgenesTFs)->x
+centgenesTFsT[which(names(centgenesTFsT) %in% x)]->centgenesTFsT
+telgenesTFsT[which(names(telgenesTFsT) %in% x)]->telgenesTFsT
+#
+print("Predominantly Telomere Factors")
+names(which(centgenesTFsT/telgenesTFsT<=0.8))
+print("Predominantly Centromere Factors")
+names(which(centgenesTFsT/telgenesTFsT>=1.2))
+```
+
+
+
+# Results #5: Histone Modification Similarities
+* Histone modifications suggest (as expected) that Ohnologs are enriched in more highly expressed, constitutive genes, as suggested by active transcriptional activation and elongation marks (H3K4, H3K36).
+* For paralogs, on the other hand, the most prominent mark is the alternative histone variant H2A.Z that is known to mark the promoters of stress-response and non-constitutive genes.
+* [Data: Washington University]
+```{r, echo=F, eval=T, message=F, warning=F}
+genelist<-ssd
+i<-which(allyeasthismod$Accession %in% genelist)
+ssdmat<-as.matrix(allyeasthismod[i,2:23])
+ssdmat[is.na(ssdmat)]<-0
+#heatmap(ssdmat, labRow = "", cexCol = 0.5, main="Paralogs")
+#
+genelist<-wgd
+i<-which(allyeasthismod$Accession %in% genelist)
+wgdmat<-as.matrix(allyeasthismod[i,2:23])
+wgdmat[is.na(wgdmat)]<-0
+#heatmap(wgdmat, labRow = "", cexCol = 0.5, main="Ohnologs")
+#
+genelist<-singletons
+i<-which(allyeasthismod$Accession %in% genelist)
+singmat<-as.matrix(allyeasthismod[i,2:23])
+singmat[is.na(singmat)]<-0
+#heatmap(singmat, labRow = "", cexCol = 0.5, main="Singletons")
+# Combined Heatmap
+library(gplots)
+heatmap.2(cbind(colMeans(ssdmat), colMeans(wgdmat), colMeans(singmat)), scale="none", labCol = c("Paralogs", "Ohnologs", "Singletons"), cexRow = 0.6, cexCol = 1, tracecol = "black", vline=0)
+```
+
+In the following we perform a more intuitive analysis of histone modification differences with a significance test linked to the difference in mean values between sets of genes for all types of histone modifications.
+
+```{r, Histone Modification Volcano plots}
+# selecting genes
+telgenes<-allyeastgenesprops$gene[which(allyeastgenesprops$teldist<=0.05)]
+centgenes<-allyeastgenesprops$gene[which(allyeastgenesprops$centdist<=0.05)]
+rest<-setdiff(allyeastgenes, union(telgenes, centgenes))
+library(ggplot2)
+library(ggrepel)
+hismoddf<-matrix(0, nrow = 22, ncol=3)
+hismoddf<-as.data.frame(hismoddf)
+rownames(hismoddf)<-colnames(allyeasthismod)[2:23]
+colnames(hismoddf)<-c("Tel-Cent", "Tel-Rest", "Cent-Rest")
+for(i in 2:23){hismoddf[i-1,1]<-t.test(allyeasthismod[which(allyeasthismod$Accession %in% telgenes), i], allyeasthismod[which(allyeasthismod$Accession %in% centgenes),i])$p.value}
+for(i in 2:23){hismoddf[i-1,2]<-t.test(allyeasthismod[which(allyeasthismod$Accession %in% telgenes), i], allyeasthismod[which(allyeasthismod$Accession %in% rest),i])$p.value}
+for(i in 2:23){hismoddf[i-1,3]<-t.test(allyeasthismod[which(allyeasthismod$Accession %in% centgenes), i], allyeasthismod[which(allyeasthismod$Accession %in% rest),i])$p.value}
+for(i in 2:23){hismoddf$`Tel-Cent-Diff`[i-1]<-mean(allyeasthismod[which(allyeasthismod$Accession %in% telgenes),i], na.rm=T)-mean(allyeasthismod[which(allyeasthismod$Accession %in% centgenes),i], na.rm=T)}
+for(i in 2:23){hismoddf$`Tel-Rest-Diff`[i-1]<-mean(allyeasthismod[which(allyeasthismod$Accession %in% telgenes),i], na.rm=T)-mean(allyeasthismod[which(allyeasthismod$Accession %in% rest),i], na.rm=T)}
+for(i in 2:23){hismoddf$`Cent-Rest-Diff`[i-1]<-mean(allyeasthismod[which(allyeasthismod$Accession %in% centgenes),i], na.rm=T)-mean(allyeasthismod[which(allyeasthismod$Accession %in% rest),i], na.rm=T)}
+ggplot(hismoddf, aes(x = `Tel-Cent-Diff`, y = -log10(`Tel-Cent`), size = -log10(`Tel-Cent`), colour = `Tel-Cent`)) + geom_point() + geom_text_repel(aes(label = rownames(hismoddf)), size = 4, max.overlaps = 10)
+ggplot(hismoddf, aes(x = `Tel-Rest-Diff`, y = -log10(`Tel-Rest`), size = -log10(`Tel-Rest`), colour = `Tel-Rest-Diff`)) + geom_point() + geom_text_repel(aes(label = rownames(hismoddf)), size = 4, max.overlaps = 10)
+ggplot(hismoddf, aes(x = `Cent-Rest-Diff`, y = -log10(`Cent-Rest`), size = -log10(`Cent-Rest`), colour = `Cent-Rest-Diff`)) + geom_point() + geom_text_repel(aes(label = rownames(hismoddf)), size = 4, max.overlaps = 10)
+```
+
+
+# Results #6: Gene co-expression between duplicates is more dependent on chromatin than gene regulation
+* We analyzed gene co-expression using a scaled Adjusted Correlation Score (ACS) from the SPELL database that has compiled gene expression data for yeast in a large number (>10000) of samples.
+* Mean ACS for SSD/WGD pairs is not very different (2.06 and 2.09 respectively) but is significantly higher than the average ACS over the total yeast genome (which is ~1)
+```{r, echo=F, eval=T, message=F, warning=F}
+my_comparisons <- list(c("SSD", "WGD"))
+bplot<-ggboxplot(completedata, x = "Type", y = "ACS", fill = "Type", title="ACS score", palette = c("firebrick4",  "steelblue4"))+ stat_compare_means()
+bplot
+```
+
+# Results Recap
+* We analyzed the differences for a number of a number of already adressed properties, based on the type of duplication event
+1. Sequence Divergence
+```{r, echo=F, eval=T, message=F, warning=F}
+my_comparisons <- list(c("SSD", "WGD"))
+bplot<-ggboxplot(completedata, x = "Type", y = "Distance_a_b_corrected", fill = "Type", title="Sequence Divergence", palette = c("firebrick4",  "steelblue4"))+ stat_compare_means()
+bplot
+```
+
+# Results Recap
+2. Mean Gene Pair Conservation
+```{r, echo=F, eval=T, message=F, warning=F}
+completedata$MeanCons<-(completedata$phCons1+completedata$phCons2)/2
+my_comparisons <- list(c("SSD", "WGD"))
+bplot<-ggboxplot(completedata, x = "Type", y = "MeanCons", fill = "Type", title="Mean Sequence Conservation", palette = c("firebrick4",  "steelblue4"))+ stat_compare_means()
+bplot
+```
+
+# Results Recap
+3. Similarity of TFs with binding sites in the promoter (as Jaccard Index)
+```{r, echo=F, eval=T, message=F, warning=F}
+my_comparisons <- list(c("SSD", "WGD"))
+bplot<-ggboxplot(completedata, x = "Type", y = "Jaccard_tf", fill = "Type", title="Regulatory Repertoire Similarity", palette = c("firebrick4",  "steelblue4"))+ stat_compare_means()
+bplot
+```
+
+# Results Recap
+4. Similarity of nucleosome positioning pattern between gene pairs (as Pearson correlation)
+```{r, echo=F, eval=T, message=F, warning=F}
+my_comparisons <- list(c("SSD", "WGD"))
+bplot<-ggboxplot(completedata, x = "Type", y = "nucCor_SEQ", fill = "Type", title="Nucleosome Occupancy Pattern Similarity", palette = c("firebrick4",  "steelblue4"))+ stat_compare_means()
+bplot
+```
+
+# Results Recap
+* Even though the diverge faster, SSD are more conserved than WGD. This is expected since they are generally accepted to be more recent.
+* The similarity in nucleosome positioning patterns is greater in SSD. This is somewhat puzzling given a) their greater divergence  and b) their smaller similarity in terms of TF regulation
+* ACS is significantly more correlated with nucleosome positioning similarity than with TF similarity
+
+```{r, echo=F, eval=T, message=F, warning=F}
+print("Correlation with TF similarity")
+cor.test(completedata$ACS, completedata$Jaccard_tf)
+print("Correlation with Nucleosome Positioning")
+cor.test(completedata$ACS, completedata$nucCor_SEQ)
+```
+
+# Results 6.5: Functional Enrichments
+```{r, echo=F, eval=T, message=F, warning=F}
+funcenrplot<-function(setofgenes, species, top, header){  
+gost(query=as.character(setofgenes), organism=species, significant=T)->out
+out<-out$result
+out<-out[which(out$term_size<=1000 & out$term_size>=10),]
+out<-out[order(out$p_value/out$term_size, decreasing=F),]
+out$new_term<-paste(out$source,":",out$term_name)
+out$new_term<-factor(out$new_term, levels = out$new_term[order(out$p_value, decreasing=T)])
+#
+head(out,top)->out
+#  
+funcplot<-ggplot(out, aes(x=new_term, y=-log10(p_value), label=round(-log10(p_value)),5)) + 
+  geom_point(stat='identity', aes(col=-log10(p_value)), size=5)  +
+  geom_text(color="black", size=2) +
+  scale_color_gradient(low="steelblue4", high="firebrick4")+
+  labs(title=header, 
+       subtitle="Functional Enrichments") + 
+  ylim(0, max(-log10(out$p_value))+1) +
+  theme(text = element_text(size=10)) +
+  coord_flip()
+return(funcplot)
+}
+funcenrplot(ssd, "scerevisiae", 30, "Paralogs")
+funcenrplot(wgd, "scerevisiae", 30, "Ohnologs")
+funcenrplot(singletons, "scerevisiae", 30, "Singletons")
+```
+
+# Results #7: Modeling of gene co-expression
+* Duplicate gene pair ACS was used as a proxy for co-expression and was modeled against a number of other aspects.
+
+```{r, echo=F, eval=T, message=F, warning=F}
+library(rpart)
+library(rpart.plot)
+rm(moddata)
+moddata<-data.frame(ACS=completedata$ACS, MeanCons=completedata$MeanCons, TFSim=completedata$Jaccard_tf, NucSim=completedata$nucCor_SEQ, Div=completedata$Distance_a_b_corrected, Type=completedata$Type, TelDist=completedata$MeanTelDist, meanDomACS=completedata$meanDomACS)
+for(i in 1:length(moddata[1,])){
+  moddata[which(is.na(moddata[,i])),i]<-0
+}
+rpartmodel<-rpart(ACS~MeanCons+TFSim+NucSim+Div+TelDist+meanDomACS, data=moddata)
+rpart.plot(rpartmodel,box.palette="RdYlGn", shadow.col="gray", nn=T)
+```
+
+# Results #7: Modeling of gene co-expression
+* More than 50% of cases, with low conservation and high divergence have low ACS scores
+* However a small percentage of ~7-8% of the genes have ACS>=3.5. These are gene pairs that even with high divergence have high nucleosome similarity and are close to telomeres.
+* One interesting question is to what extent telomere (chromosomal edge) distance may be related to co-expression.
+
+# Results #7: Modeling of gene duplication type
+* In terms of defining the duplication event, mean conservation, divergence and telomere distance are the most important properties.
+
+```{r, echo=F, eval=T, message=F, warning=F}
+library(rpart)
+library(rpart.plot)
+rm(moddata)
+moddata<-data.frame(ACS=completedata$ACS, MeanCons=completedata$MeanCons, TFSim=completedata$Jaccard_tf, NucSim=completedata$nucCor_SEQ, Div=completedata$Distance_a_b_corrected, Type=completedata$Type, TelDist=completedata$MeanTelDist, meanDomACS=completedata$meanDomACS)
+for(i in 1:length(moddata[1,])){
+  moddata[which(is.na(moddata[,i])),i]<-0
+}
+rpartmodel<-rpart(Type~ACS+MeanCons+TFSim+NucSim+Div+TelDist+meanDomACS, data=moddata)
+rpart.plot(rpartmodel,box.palette="RdYlGn", shadow.col="gray", nn=T)
+```
+
+# Results #7: Modeling of gene duplication type
+* This is supported by a Random Forest model, with the importance of each feature in discriminating between SSD/WGD events shown below
+
+```{r, echo=F, eval=T, message=F, warning=F}
+library(rpart)
+library(rpart.plot)
+rm(moddata)
+moddata<-data.frame(ACS=completedata$ACS, MeanCons=completedata$MeanCons, TFSim=completedata$Jaccard_tf, NucSim=completedata$nucCor_SEQ, Div=completedata$Distance_a_b_corrected, Type=completedata$Type, TelDist=completedata$MeanTelDist, meanDomACS=completedata$meanDomACS)
+for(i in 1:length(moddata[1,])){
+  moddata[which(is.na(moddata[,i])),i]<-0
+}
+rfmodel<-randomForest(Type~ACS+MeanCons+TFSim+NucSim+Div+TelDist+meanDomACS, data=moddata)
+rfmodel$importance[order(rfmodel$importance, decreasing = T),]
+```
+
+# Results #8: Segmentation along the yeast genome
+```{r}
+library(ggplot2)
+library(dplyr)
+#
+nwindows<-10
+chrombinsize<-floor(chromsizes$chromsize/nwindows)
+valuesmat<-matrix(0, nrow = length(chromsizes$chr), ncol = nwindows)
+
+inputdf<-x
+
+# create values matrix
+for(chromno in 1:16){
+  i<-which(inputdf$chr==as.character(chromsizes$chr[chromno]))
+  values<-data.frame(start=inputdf$start[i], end=inputdf$end[i], val=inputdf$NFRscore[i])
+#
+  for(k in 0:(nwindows-1)){
+    selection<-which(values[,1]>=k*chrombinsize[chromno] & values[,2]<=(k+1)*chrombinsize[chromno])
+    valuesmat[chromno, (k+1)]<-mean(values$val[selection], na.rm=T)
+  }
+}
+
+# values matrix into data.frame
+valuesdf<-as.data.frame(valuesmat)
+colnames(valuesdf)<-paste(ceiling(seq(from=0, to=100, by=(1/nwindows)*100))[2:(nwindows+1)], "%", sep="")
+valuesdf<-stack(valuesdf)
+valuesdf<-data.frame(valuesdf, rep(chromsizes$chr,nwindows))
+colnames(valuesdf)<-c("Mean Structural Constraint in Promoter", "Percentile", "Chromosome")
+# plotting
+p <-ggplot(valuesdf, aes(x=Percentile, y=`Mean Structural Constraint in Promoter`)) + geom_point(color='#2980B9', size = 0.5) + geom_smooth(method=lm, color='#2C3E50') + stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", color="red", width=0.2) + stat_summary(fun=mean, geom="point", color="red")
+p
+```
+
+
+
+# Results #9: Gene Neighborhoods?
+* The idea here is to check at some properties that are specific to the **genomic context**, that is the region in which the duplicate genes are embedded. 
+* These properties may be basically be everything we have checked so far (TF, structure, conservation, spacing, etc) only we can analyze them under the lens of **linear proximity**.
+* The main goal here is to see whether duplicate genes tend to bear more similarity (accounting for other properties) with their environment compared to their duplicate pair.
+[pending]
+
+# Results #9: 3D data?
+* TBA [pending]
+
+# Conclusions
+* Expected
+  1. Higher conservation of SSD (as more recent)
+  2. 
+* Not expected
+  1. SSD genes enriched towards chromosomal edges
+  2. SSD genes enriched in essential genes, but WGD with more stably expressing histone modification patterns
+  3. Nucleosome positioning similarity is more predictive of regulatory similarity for co-expression. 
+  4. Two distinct patterns. Ohnologs more central, less diverged, more similar in terms of regulation. Paralogs, more towards the edges, more diverged, but more conserved (buffered) in nucleosome positioning. 
+
