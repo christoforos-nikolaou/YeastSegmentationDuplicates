@@ -6,8 +6,5 @@ This git hosts data, code and supplementary material for our study on Yeast Gene
 
 ## Summary 
 
-In this work we explore the way genomic innovation may be promoted in particular regions of a eukaryotic genome, modulated by chromatin constraints and regulatory flexibility. Through the study of two types of gene duplicates (Small-scale, SSD and whole-genome, WGD) in various 
-
-describe a clear partitioning of a gene-dense unicellular eukaryote genome into regions with variable potential for genomic innovation through gene duplication. Our findings point towards an architectural segregation of function, regulation and evolvability in the yeast genome, which, buffered by chromatin, creates preferential "niches” for gene duplicates and thus more permissive environments for genomic innovation. 
-
-Given this work’s originality, the breadth of the discussed concepts and the possible implications it may have in the fields of genome evolution and synthetic biology, we believe that it will appeal to the readership of Nucleic Acids Research and we are thus very glad to submit it to your consideration.
+In this work we explore the way genomic innovation may be promoted in particular regions of a eukaryotic genome, modulated by chromatin constraints and regulatory flexibility. Through the study of two types of gene duplicates (Small-scale, SSD and whole-genome, WGD) in various contexts including their relative position, size, expression, regulation sequence and structural constraints we describe a clear partitioning of a gene-dense unicellular eukaryote genome into regions with variable potential for genomic innovation through gene duplication. 
+Our findings point towards an architectural segregation of function, regulation and evolvability in the yeast genome, which, buffered by chromatin, creates preferential "niches” for gene duplicates and thus more permissive environments for genomic innovation. 
