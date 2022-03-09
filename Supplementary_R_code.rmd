@@ -1,7 +1,7 @@
 ---
-title: "Gene Socialization in S. cerevisiae"
-author: "Maria Kalyva, Ioannis Iliopoulos and Christoforos Nikolaou"
-date: "January 2021"
+title: "Distinct chromosomal niches in the genome of S. cerevisiae provide the background for genomic innovation and shape the fate of gene duplicates"
+author: "Athanasia Stavropoulou, Aimilios Tassios, Maria Kalyva, Michalis Georgoulopoulos, Nikolaos Vakirlis, Ioannis Iliopoulos and Christoforos Nikolaou"
+date: "March 2022"
 output:
   html_document:
     df_print: paged
@@ -35,16 +35,6 @@ library(ggtext)
 library(ggrepel)
 ```
 
-```{r setup}
-library(reticulate)
-use_python("/usr/bin/python3.8")
-```
-
-```{python, warnings=F}
-
-
-```
-
 ## Data
 
 ### General Data Loading
@@ -58,8 +48,6 @@ coords<-read.delim("~/Dropbox/Data/gene_coordinates/saccer2_refseq_genes_TSS_TTS
 colnames(coords)<-c("chr", "TSS", "TTS", "Gene", ".", "strand")
 # Duplicates
 dupgenes<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/sacCer2_genes_dupStatus.tsv", header=T, sep="\t")
-# Strands
-genestrands<-read.delim("~/Dropbox/Data/SGD/7071genes_saccer2_leftandrigth_strands.bed", header=T, sep="\t")
 # Most updated dataset
 completedata<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Duplicate_Genes_Full_file_1054_pairs_new.tsv", header=T, sep="\t")
 ###
@@ -73,43 +61,17 @@ gedup<-read.delim("GeneDup_New_Analysis_full_info.tsv", header=T, sep="\t")
 completedata<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Duplicate_Genes_Full_file_1054_pairs_new.tsv", header=T, sep="\t")
 completedata$meanDomACS<-(completedata$N1_mACS+completedata$N2_mACS)/2
 #
-tfconsdup<-read.delim("GeneDup_New_Analysis_TF_Cons.tsv", header=T, sep="\t")
-ntf1<-0;for(i in 1:length(tfconsdup[,1])){ntf1[i]<-length(strsplit(as.character(tfconsdup$Gene1TF[i]), ",")[[1]])}
-ntf2<-0;for(i in 1:length(tfconsdup[,1])){ntf2[i]<-length(strsplit(as.character(tfconsdup$Gene2TF[i]), ",")[[1]])}
-tfconsdup<-data.frame(tfconsdup, Gene1TFno=ntf1, Gene2TFno=ntf2)
-#
-synteny<-read.delim("YGOBSyntenyScores.tsv", header=T, sep="\t")
-#
-repTiming<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/sacCer2_RepTiming.bed", header=F, sep="\t")
-colnames(repTiming)<-c("chrom", "start", "end", "Gene", "meanDNAReplicationTiming")
-#
 # Gene coordinates
 ssdgenecoords<-read.delim("~/Dropbox/Data/SGD/geneParalogs/SSD_genes.bed", header=F, sep="\t")
 wgdgenescoords<-read.delim("~/Dropbox/Data/SGD/geneParalogs/WGD_genes.bed", header=F, sep="\t")
 # Other data
 coddens<-read.delim("~/Dropbox/Data/SGD/gene_neighborhoods_10k_codCov.bed", header=F, sep="\t")
 colnames(coddens)<-c("chrom", "start", "end", "Gene", "codingDensity")
-#phconsclust<-read.delim("~/Dropbox/Data/SGD/All_sacCer2_genes_phCons.bwsum.clusters", header=F, sep="\t")
-# Tirosh 
-exprCons<-read.delim("~/Dropbox/Data/SGD/TiroshBarkai2007_expressionConservationdata.tsv", header=T, sep="\t")
-# Tirosh-Barkai 43 genes with Assymetrical Transcription Correlation
-# these are genes one of whose pair is correlated in expression with Candida but the other is not
-divExpGenes<-c( "URA7", "YML125C", "YGR141W", "URA5", "SEC14", "YDR018C", "UTH1", "MRS3", "YDR341C", "SVL3", "YGL060W", "YKL035W", "FKS1", "APA1", "YOR054C", "EGD1", "PRK1", "YOR227W", "GSP1", "YBL054W", "EMP70", "YDR185C", "GZF3", "YEL006W", "ARE2", "YMR102C", "YIL036W", "YJL084C", "YOR108W", "YKR027W", "YHR149C", "YGL133W", "YER119C", "RSC6", "HXK2", "YLL010C", "AAP1'", "YGL144C", "PMT2", "NHP6A", "MKK2", "YBR238C", "CDC19") 
-divExpGene_fdata<-c(30 , 847 , 670 , 289 , 138 , 609 , 816 , 666 , 158 , 5 , 110 , 12 , 722 , 63 , 668 , 266 , 475 , 267 , 238 , 157 , 728 , 429 , 74 , 987 , 855 , 503 , 289 , 984 , 35 , 251 , 338 , 658 , 447 , 764 , 110 , 63 , 107 , 536 , 756 , 728 , 367 , 923 , 662 , 519 , 49 , 190)
-# Constanzo
-genInter<-read.delim("~/Dropbox/Data/SGD/sgadata_costanzo2009_lenientCutoff_101120.txt", header=T, sep="\t")
 # bwsummary data
 seqconsTSS<-read.delim("~/Dropbox/Data/SGD/SC_Robustness/saccer2_refseq_genes_TSS_plusmin500_phCons.bwsum", header=F, sep="\t")
 which(is.na(rowMeans(seqconsTSS[,4:103])))->x
 seqconsTSS<-seqconsTSS[-x,]
 colnames(seqconsTSS)[2]<-"Gene"
-# PhyloCSF
-phyloCSF<-read.delim("~/Dropbox/Data/SGD/sacCer3_sgd_genes_TSS_plusmnin500_PhyloCSFpower.bwsum", header=F, sep="\t")
-#which(is.na(rowMeans(phyloCSF[,5:104])))->x
-#phyloCSF<-phyloCSF[-x,]
-meanphyloCSF<-read.delim("~/Dropbox/Data/SGD/sacCer3_sgd_genes_phyloCSFpower.bwsum", header=F, sep="\t")
-colnames(meanphyloCSF)<-c("chr", "start", "end", "Gene", "phyloCSF")
-#
 # Struc Conservation
 strconsTSS<-read.delim("~/Dropbox/Data/SGD/SC_Robustness/saccer2_refseq_genes_TSS_plusmin500_scRob.bwsum", header=F, sep="\t")
 colnames(strconsTSS)[2]<-"Gene"
@@ -132,11 +94,6 @@ nucPosClust$trNoise<-as.numeric(as.character(nucPosClust$trNoise))
 nucPosClust$trNoise[which(is.na(as.numeric(as.character(nucPosClust$trNoise))))]<-0
 nucPosClust$domACS<-as.numeric(as.character(nucPosClust$domACS))
 nucPosClust$domACS[which(is.na(as.numeric(as.character(nucPosClust$domACS))))]<-0
-# Co-expression Continents
-continents<-read.delim("~/Dropbox/Teaching/theses/MGeorgoulopoulos/Data/Continents.tsv", header=T, sep="\t")
-# Histone Modifications
-hismodprom<-read.delim("~/Dropbox/Data/SGD/all_gene_profiles/all_genes_washuniv_hismod_normalized_promoter_regions.tsv", header=T, sep="\t")
-hismodorf<-read.delim("~/Dropbox/Data/SGD/all_gene_profiles/all_genes_washuniv_hismod_normalized_ORF_regions.tsv", header=T, sep="\t")
 # 3D coordinates
 coords3d<-read.delim("~/Dropbox/Teaching/theses/MGeorgoulopoulos/Data/GenePositions.tsv", header=T, sep="\t")
 coords3d$polar<-sqrt((coords3d$x-mean(coords3d$x))**2+(coords3d$y-mean(coords3d$y))**2+(coords3d$z-mean(coords3d$z))**2)
