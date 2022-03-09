@@ -1,0 +1,2361 @@
+---
+title: "Gene Socialization in S. cerevisiae"
+author: "Maria Kalyva, Ioannis Iliopoulos and Christoforos Nikolaou"
+date: "January 2021"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+version: v2
+---
+
+# Initializations
+```{r, Loading Libraries}
+library(partykit)
+library(gplots)
+library(rpart)
+library(rpart.plot)
+library(MASS)
+library(stats)
+library(randomForest)
+library(ggfortify)
+library(ggplot2)
+library(RColorBrewer)
+#library(heatmap.plus)
+library(arules)
+library(arulesViz)
+library(knitr)
+library(gProfileR)
+library(multcomp)
+library(NbClust)
+library(beanplot)
+library(ggpubr)
+library(ggtext)
+library(ggrepel)
+```
+
+```{r setup}
+library(reticulate)
+use_python("/usr/bin/python3.8")
+```
+
+```{python, warnings=F}
+
+
+```
+
+## Data
+
+### General Data Loading
+```{r, Data Loading}
+#
+chromosomes<-read.table("~/Dropbox/Data/yeast_interactions_noble/saccer2_R.genome")[,1:4]
+chromsizes<-read.delim("~/Dropbox/Data/genomes/sacCer2.genome", header=F, sep="\t")
+colnames(chromsizes)<-c("chr", "chromsize")
+# Coordinates
+coords<-read.delim("~/Dropbox/Data/gene_coordinates/saccer2_refseq_genes_TSS_TTS.bed", header=F, sep="\t")
+colnames(coords)<-c("chr", "TSS", "TTS", "Gene", ".", "strand")
+# Duplicates
+dupgenes<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/sacCer2_genes_dupStatus.tsv", header=T, sep="\t")
+# Strands
+genestrands<-read.delim("~/Dropbox/Data/SGD/7071genes_saccer2_leftandrigth_strands.bed", header=T, sep="\t")
+# Most updated dataset
+completedata<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Duplicate_Genes_Full_file_1054_pairs_new.tsv", header=T, sep="\t")
+###
+fdata<-read.delim("MKalyva_Duplicated_genes2019_ACS.tsv", header=T, sep="\t")
+fdata$distTel<-(fdata$distTelomerA+fdata$distTelomerB)/2
+fdata$distCent<-(fdata$distCentromereA+fdata$distCentromereB)/2
+fdata$MeanNeighbACS<-(fdata$NeighbA_ACS+fdata$NeighbB_ACS)/2
+#
+gedup<-read.delim("GeneDup_New_Analysis_full_info.tsv", header=T, sep="\t")
+#
+completedata<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Duplicate_Genes_Full_file_1054_pairs_new.tsv", header=T, sep="\t")
+completedata$meanDomACS<-(completedata$N1_mACS+completedata$N2_mACS)/2
+#
+tfconsdup<-read.delim("GeneDup_New_Analysis_TF_Cons.tsv", header=T, sep="\t")
+ntf1<-0;for(i in 1:length(tfconsdup[,1])){ntf1[i]<-length(strsplit(as.character(tfconsdup$Gene1TF[i]), ",")[[1]])}
+ntf2<-0;for(i in 1:length(tfconsdup[,1])){ntf2[i]<-length(strsplit(as.character(tfconsdup$Gene2TF[i]), ",")[[1]])}
+tfconsdup<-data.frame(tfconsdup, Gene1TFno=ntf1, Gene2TFno=ntf2)
+#
+synteny<-read.delim("YGOBSyntenyScores.tsv", header=T, sep="\t")
+#
+repTiming<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/sacCer2_RepTiming.bed", header=F, sep="\t")
+colnames(repTiming)<-c("chrom", "start", "end", "Gene", "meanDNAReplicationTiming")
+#
+# Gene coordinates
+ssdgenecoords<-read.delim("~/Dropbox/Data/SGD/geneParalogs/SSD_genes.bed", header=F, sep="\t")
+wgdgenescoords<-read.delim("~/Dropbox/Data/SGD/geneParalogs/WGD_genes.bed", header=F, sep="\t")
+# Other data
+coddens<-read.delim("~/Dropbox/Data/SGD/gene_neighborhoods_10k_codCov.bed", header=F, sep="\t")
+colnames(coddens)<-c("chrom", "start", "end", "Gene", "codingDensity")
+#phconsclust<-read.delim("~/Dropbox/Data/SGD/All_sacCer2_genes_phCons.bwsum.clusters", header=F, sep="\t")
+# Tirosh 
+exprCons<-read.delim("~/Dropbox/Data/SGD/TiroshBarkai2007_expressionConservationdata.tsv", header=T, sep="\t")
+# Tirosh-Barkai 43 genes with Assymetrical Transcription Correlation
+# these are genes one of whose pair is correlated in expression with Candida but the other is not
+divExpGenes<-c( "URA7", "YML125C", "YGR141W", "URA5", "SEC14", "YDR018C", "UTH1", "MRS3", "YDR341C", "SVL3", "YGL060W", "YKL035W", "FKS1", "APA1", "YOR054C", "EGD1", "PRK1", "YOR227W", "GSP1", "YBL054W", "EMP70", "YDR185C", "GZF3", "YEL006W", "ARE2", "YMR102C", "YIL036W", "YJL084C", "YOR108W", "YKR027W", "YHR149C", "YGL133W", "YER119C", "RSC6", "HXK2", "YLL010C", "AAP1'", "YGL144C", "PMT2", "NHP6A", "MKK2", "YBR238C", "CDC19") 
+divExpGene_fdata<-c(30 , 847 , 670 , 289 , 138 , 609 , 816 , 666 , 158 , 5 , 110 , 12 , 722 , 63 , 668 , 266 , 475 , 267 , 238 , 157 , 728 , 429 , 74 , 987 , 855 , 503 , 289 , 984 , 35 , 251 , 338 , 658 , 447 , 764 , 110 , 63 , 107 , 536 , 756 , 728 , 367 , 923 , 662 , 519 , 49 , 190)
+# Constanzo
+genInter<-read.delim("~/Dropbox/Data/SGD/sgadata_costanzo2009_lenientCutoff_101120.txt", header=T, sep="\t")
+# bwsummary data
+seqconsTSS<-read.delim("~/Dropbox/Data/SGD/SC_Robustness/saccer2_refseq_genes_TSS_plusmin500_phCons.bwsum", header=F, sep="\t")
+which(is.na(rowMeans(seqconsTSS[,4:103])))->x
+seqconsTSS<-seqconsTSS[-x,]
+colnames(seqconsTSS)[2]<-"Gene"
+# PhyloCSF
+phyloCSF<-read.delim("~/Dropbox/Data/SGD/sacCer3_sgd_genes_TSS_plusmnin500_PhyloCSFpower.bwsum", header=F, sep="\t")
+#which(is.na(rowMeans(phyloCSF[,5:104])))->x
+#phyloCSF<-phyloCSF[-x,]
+meanphyloCSF<-read.delim("~/Dropbox/Data/SGD/sacCer3_sgd_genes_phyloCSFpower.bwsum", header=F, sep="\t")
+colnames(meanphyloCSF)<-c("chr", "start", "end", "Gene", "phyloCSF")
+#
+# Struc Conservation
+strconsTSS<-read.delim("~/Dropbox/Data/SGD/SC_Robustness/saccer2_refseq_genes_TSS_plusmin500_scRob.bwsum", header=F, sep="\t")
+colnames(strconsTSS)[2]<-"Gene"
+x<-which(rowMeans(strconsTSS[,4:103])>0.1)
+strconsTSS<-strconsTSS[-x,]
+mutasomeTSS<-read.delim("~/Dropbox/Data/SGD/SC_Robustness/saccer2_refseq_genes_TSS_plusmin500_mutasome.bwsum", header=F, sep="\t")
+colnames(mutasomeTSS)[2]<-"Gene"
+# Gene spacers
+spacers<-read.delim("~/Dropbox/Data/SGD/sacCer2_genes_spacers_length.tsv", header=T, sep="\t")
+colnames(spacers)[1]<-"Gene"
+spacers$meanSpacer<-(spacers$gene_up+spacers$gene_down)/2
+spacers$logLength<-log10(spacers$length)
+spacers$logSpacer<-log10(spacers$meanSpacer)
+# Nucleosome Positioning
+nucPosClust<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/TAD_plus_Insulators_vs_saccer2genes_scaleddist_telomere_centromere_distARS_phcons_trnoise_clusterACS_pughTSS.tsv", header=F, sep="\t")
+colnames(nucPosClust)<-c("chrom", "domStart", "domEnd", "nucDomain", "geneChrom", "geneStart", "geneEnd", "gene", "blank", "strand", "distTel", "distCent", "distARS", "phCons", "trNoise", "domACS", "gene2", paste("nuc",seq(-495,495,by=10)), "overlap")
+nucPosClust$phCons<-as.numeric(as.character(nucPosClust$phCons))
+nucPosClust$phCons[which(is.na(as.numeric(as.character(nucPosClust$phCons))))]<-0
+nucPosClust$trNoise<-as.numeric(as.character(nucPosClust$trNoise))
+nucPosClust$trNoise[which(is.na(as.numeric(as.character(nucPosClust$trNoise))))]<-0
+nucPosClust$domACS<-as.numeric(as.character(nucPosClust$domACS))
+nucPosClust$domACS[which(is.na(as.numeric(as.character(nucPosClust$domACS))))]<-0
+# Co-expression Continents
+continents<-read.delim("~/Dropbox/Teaching/theses/MGeorgoulopoulos/Data/Continents.tsv", header=T, sep="\t")
+# Histone Modifications
+hismodprom<-read.delim("~/Dropbox/Data/SGD/all_gene_profiles/all_genes_washuniv_hismod_normalized_promoter_regions.tsv", header=T, sep="\t")
+hismodorf<-read.delim("~/Dropbox/Data/SGD/all_gene_profiles/all_genes_washuniv_hismod_normalized_ORF_regions.tsv", header=T, sep="\t")
+# 3D coordinates
+coords3d<-read.delim("~/Dropbox/Teaching/theses/MGeorgoulopoulos/Data/GenePositions.tsv", header=T, sep="\t")
+coords3d$polar<-sqrt((coords3d$x-mean(coords3d$x))**2+(coords3d$y-mean(coords3d$y))**2+(coords3d$z-mean(coords3d$z))**2)
+# creating Territories (Central, Intermediate, Peripheral, accorind to polar coordinates)
+coords3d$genomeTerritory<-""
+coords3d$genomeTerritory[which(scale(coords3d$polar)[,1]<=-0.5675008)]<-"Central"
+coords3d$genomeTerritory[which(scale(coords3d$polar)[,1]>-0.5675008 & scale(coords3d$polar)[,1]<0.4024737)]<-"Intermediate"
+coords3d$genomeTerritory[which(scale(coords3d$polar)[,1]>=0.4024737)]<-"Peripheral"
+coords3d$genomeTerritory<-as.factor(coords3d$genomeTerritory)
+# PfamDomains
+pfamDom<-read.delim("~/Dropbox/Data/Pfam/all_yeast_proteins_PfamScan_nDom_sizeDom_len_nDomlen_sizeDomlen.tsv", header=T, sep="\t")
+pfamAll<-read.delim("~/Dropbox/Data/Pfam/all_yeast_proteins_PfamScan.tsv", header=T, sep="\t")
+# PFAM domains
+saccer2pfam<-read.delim("~/Dropbox/Data/Pfam/all_yeast_proteins_PfamScan.bed", header=F, sep="\t")
+colnames(saccer2pfam)<-c("chr", "start", "end", "gene", ".", "strand", "teldist", "centdist", "arsdist", "phcons", "trnoise", "clusteracs", "GeneName", "AlStart","AlEnd","EnvStart","EnvEnd","HMMAcc","HMMName","Type", "HMMStart", "HMMEND", "HMMLength", "BitScore", "E.value", "Significance", "Clan")
+# 3D interactions
+# Networks created with the use of:
+# while read gene; do grep -P "\t$gene\t" sacCer2_allgenes_mapped_on_total_interactions_Duan.bed; done  < geneParalogs/Singletons1100Sample.genes | gawk '{val[$4]++; val[$8]++}END{for (i in val) {print i"\t"val[i]}}' | sort -rnk2 > singletons1100.net
+# in Dropbox/Data/SGD
+# Read 3D gene network datafiles (number of gene interactions in 3D)
+#totalnet<-read.delim("Dropbox/Data/SGD/sacCer2_allgenes_mapped_on_total_interactions_Duan.bed", header=F, sep="\t")
+ssdnet<-read.table("~/Dropbox/Data/SGD/ssd.net")
+wgdnet<-read.table("~/Dropbox/Data/SGD/wgd.net")
+singAnet<-read.table("~/Dropbox/Data/SGD/singletons.net")
+singTnet<-read.table("~/Dropbox/Data/SGD/singletons1100.net") # random 1100 singletons
+# Regulatory code
+regcode<-read.delim("~/Dropbox/Data/Yeast_RegCode/sacCer2_Promoters_min300_plus_100_vs_Harbison_RegCode.bed", header=F, sep="\t")
+colnames(regcode)<-c("chrom", "start", "end", "Gene", "TFNo", "TFs")
+x<-which(regcode$TFs!=".")
+regcode<-regcode[x,]
+# Genetic Interactions
+#datamat<-read.delim("~/Dropbox/Data/YeastGeneticInteractions/All_Interactions_Matrix_cc_ALL.txt", header=T, sep="\t")
+#rowGenes<-datamat[,2]
+#colGenes<-unname(unlist(datamat[1,]))
+# GO categories
+yeastGO<-read.delim("~/Dropbox/Data/SGD/SGDgenes_GOterms.tsv", header=F, sep=",")
+colnames(yeastGO)<-c("Gene", "GOTerms")
+yeastgosimple<-read.delim("~/Dropbox/Data/SGD/SGDgenes_GOtermsSimple.tab", header=F, sep="\t")
+colnames(yeastgosimple)<-c("Number of GOTerms", "Gene", "GOTerms")
+# Semantic Analysis (Performed with GOGO, http://dna.cs.miami.edu/cgi-bin/GOGO/initial.cgi)
+ssdGOsim<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/result_ssd_genes_GO_forR.tab", header=F, sep="\t")
+wgdGOsim<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/result_wgd_genes_GO_forR.tab", header=F, sep="\t")
+# Network Interactions
+scerSTRINGPPI<-read.delim("~/Dropbox/Data/sacCer2Datasets/sacCer2_STRING_DB_NetworkInteractions.txt", header=T, sep=" ")
+table(scerSTRINGPPI$protein1)->scerSTRINGPPINumber
+scerSTRINGPPINumber<-data.frame("Gene"=names(scerSTRINGPPINumber), "PPINo"=scerSTRINGPPINumber)
+# Promoter Structure
+promStruc<-read.delim("~/Dropbox/Data/sacCer2Datasets/sacCer2_features_vs_kmeans40_abbrev_binary_alltargets_allsectors.bed", header=T, sep="\t")
+# Rossi meta-assemblages
+promStrucEnr<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/sacCer_Duplicates_Categories_vs_MetaAssemblages_enrichmentMatrix.bed", header=T, sep="\t")
+promStrucP<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/sacCer_Duplicates_Categories_vs_MetaAssemblages_pvalueMatrix.bed", header=T, sep="\t")
+# Tandem Repeats
+tandemRepsProm<-read.delim("~/Dropbox/Data/SGD/Vinces_2009_tandem_repeats_in_yeast_promoters.tsv", header=T, sep="\t")
+colnames(tandemRepsProm)[2]<-"Gene"
+tandemRepsGene<-read.delim("~/Dropbox/Data/sacCer2Datasets/sacCer2_genes_dupStatus_vs_tandemRepeats.bed", header=F, sep="\t")
+colnames(tandemRepsGene)<-c("chrom", "start", "end", "Gene", "Gene2", "strand", "geneType", "geneClusterType", "repchrom", "repStart", "repEnd", "repName",	"period",	"copyNum",	"consensusSize",	"perMatch",	"perIndel",	"score",	"entropy",	"repSequence", "overlap")
+# Fares dN rate and duplicate Number
+faresdn<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/FaresGBE2017_dNRate_noDuplicates_vs_allgenesbyCluster.bed", header=F, sep="\t")[,c(1,2,3,4,5,7,8,12,13)]
+colnames(faresdn)<-c("chrom", "start", "end", "GeneName", "Gene", "geneType", "geneClusterType", "dN", "NumberOfDuplicates")
+faresdnDomains<-read.delim("~/Dropbox/Data/FaresGBE2017/FaresGBE2017_mutRate_noDuplicates.bed", header=F, sep="\t")
+# Keane Cell Localization
+dupgeneloc<-read.delim("~/Dropbox/Data/Keane2014_DuplicateLocalization/YeastGeneDuplicate_CellLoc.tsv", header=T, sep="\t")
+# Lafontaine et al Yeast Gene relics
+yeastRelicsSimilars<-read.table("~/Dropbox/Data/Lafontain2004_YeastGeneRelics/yeast_relics_similar_genes.txt")[,1]
+yeastRelicsCoords<-read.delim("~/Dropbox/Data/Lafontain2004_YeastGeneRelics/sacCer2_GeneRelics.bed", header=F, sep="\t")
+```
+
+### Creation of Gene Lists
+```{r}
+# Phylostratigraphy
+yeastgeneorigins<-read.delim("~/Dropbox/Data/YeastGeneLists/Scer_genes_phylostratigrahpy.tsv", header=T, sep="\t")
+scerevisiae<-yeastgeneorigins$Gene.name[which(yeastgeneorigins$Origin=="Saccharomyces cerevisiae")]
+saccharomyces<-yeastgeneorigins$Gene.name[which(yeastgeneorigins$Origin=="Saccharomyces")]
+saccharomycetaceae<-yeastgeneorigins$Gene.name[which(yeastgeneorigins$Origin=="Saccharomycetaceae")]
+saccharomycetales<-yeastgeneorigins$Gene.name[which(yeastgeneorigins$Origin=="Saccharomycetales")]
+ascomycota<-yeastgeneorigins$Gene.name[which(yeastgeneorigins$Origin=="Ascomycota")]
+fungi<-yeastgeneorigins$Gene.name[which(yeastgeneorigins$Origin=="Fungi")]
+# Continents
+laurasiagenes<-continents$Gene[which(continents$Continent=="Laurasia")]
+godwanagenes<-continents$Gene[which(continents$Continent=="Godwana")]
+tethysgenes<-continents$Gene[which(continents$Continent=="Tethys")]
+antarcticagenes<-continents$Gene[which(continents$Continent=="Antarctica")]
+# Other lists
+tata<-read.delim("~/Dropbox/Data/YeastGeneLists/tata.genes")[,1]
+tataless<-read.delim("~/Dropbox/Data/YeastGeneLists/tata_less.genes")[,1]
+essential<-read.delim("~/Dropbox/Data/YeastGeneLists/essential.genes")[,1]
+nessential<-read.delim("~/Dropbox/Data/YeastGeneLists/non_essential.genes")[,1]
+hfreq<-read.delim("~/Dropbox/Data/YeastGeneLists/high_freq_expr.genes")[,1]
+lfreq<-read.delim("~/Dropbox/Data/YeastGeneLists/low_freq_expr.genes")[,1]
+# Genes
+ssdgenes<-read.delim("SSD.genes", header=F)[,1]
+wgdgenes<-read.delim("WGD.genes", header=F)[,1]
+singletongenes<-read.delim("singletons.genes", header=F)[,1]
+# Filtering STEP -> removal of species specific (very short) genes from all sets
+ssdgenes<-setdiff(ssdgenes, scerevisiae)
+wgdgenes<-setdiff(wgdgenes, scerevisiae)
+singletongenes<-setdiff(singletongenes, scerevisiae)
+# Clusters
+ssdClusters<-read.delim("SSD.merge10kclusters.genes.bed", header=F, sep="\t")
+wgdClusters<-read.delim("WGD.merge10kclusters.genes.bed", header=F, sep="\t")
+complementClusters<-read.delim("Complement.merge10kclusters.genes.bed", header=F, sep="\t")
+# Interactions 
+ssdgenesINssdClust<-intersect(unique(ssdClusters[,7]), ssdgenes)
+ssdgenesINwgdClust<-intersect(unique(wgdClusters[,7]), ssdgenes)
+wgdgenesINssdClust<-intersect(unique(ssdClusters[,7]), wgdgenes)
+wgdgenesINwgdClust<-intersect(unique(wgdClusters[,7]), wgdgenes)
+# cleaning up
+ssdgenesINssdClust<-setdiff(ssdgenesINssdClust, ssdgenesINwgdClust)
+wgdgenesINwgdClust<-setdiff(wgdgenesINwgdClust, wgdgenesINssdClust)
+#
+singletonsINssdClust<-intersect(unique(ssdClusters[,7]), singletongenes)
+singletonsINwgdClust<-intersect(unique(wgdClusters[,7]), singletongenes)
+singletonsINcomplementClust<-intersect(unique(complementClusters[,7]), singletongenes)
+```
+
+## Functions
+
+### Function for enrichment between lists
+```{r}
+listenrichment<-function(space, list1, list2, npermutations){
+  spacesize<-length(space)
+  rate1<-length(list1)/length(space)
+  rate2<-length(list2)/length(space)
+  expected<-rate1*rate2
+  observed<-length(intersect(list1, list2))/length(space)
+  enrichment<-observed/expected
+  # permutations
+  n = 0
+  for (i in 1:npermutations){
+    randomsample<-sample(space, length(list1), replace=F)
+    robserved<-length(intersect(randomsample, list2))/length(space)
+    renr<-robserved/expected
+    if (renr>enrichment){
+      n = n + 1
+    }
+  }
+  if (n/npermutations<0.5) {p<-n/npermutations}
+  if (n/npermutations>=0.5) {p<-(npermutations-n)/npermutations}
+  return(list(enrichment, p))
+}
+```
+
+### Functions for merging Duplication Status  with existing dataframes
+```{r}
+# function to attach a value for gene type and gene Cluster
+# x is the name of the dataframe
+# i is the column of the dataframe that hols the name of the gene, from which selection is made
+mergedf<-function(x, i){
+# x Genes
+x$geneType<-vector(mode="character", length=length(x[,1]))
+x$geneType[which(x[,i] %in% ssdgenes)]<-"SSD"
+x$geneType[which(x[,i] %in% wgdgenes)]<-"WGD"
+x$geneType[which(x[,i] %in% singletongenes)]<-"singletons"
+x$geneType[which(x$geneType=="")]<-"singletons"
+# x Gene Clusters
+x$geneClusterType<-vector(mode="character", length=length(x[,1]))
+#
+x$geneClusterType[which(x[,i] %in% ssdgenesINssdClust)]<-"SSD_in_SSDCluster"
+x$geneClusterType[which(x[,i] %in% ssdgenesINwgdClust)]<-"SSD_in_WGDCluster"
+#
+x$geneClusterType[which(x[,i] %in% wgdgenesINwgdClust)]<-"WGD_in_WGDCluster"
+x$geneClusterType[which(x[,i] %in% wgdgenesINssdClust)]<-"WGD_in_SSDCluster"
+#
+x$geneClusterType[which(x[,i] %in% singletonsINssdClust)]<-"Singletons_in_SSDCluster"
+x$geneClusterType[which(x[,i] %in% singletonsINwgdClust)]<-"Singletons_in_WGDCluster"
+x$geneClusterType[which(x[,i] %in% singletonsINcomplementClust)]<-"Singletons_in_ComplementCluster"
+x$geneClusterType[which(x$geneClusterType=="")]<-"Singletons_in_ComplementCluster"
+#
+x$geneType<-factor(x$geneType, levels=c("SSD", "WGD", "singletons"))
+x$geneClusterType<-factor(x$geneClusterType, levels=c("SSD_in_SSDCluster", "SSD_in_WGDCluster", "WGD_in_SSDCluster", "WGD_in_WGDCluster", "Singletons_in_SSDCluster", "Singletons_in_WGDCluster", "Singletons_in_ComplementCluster"))
+return(x)
+}
+```
+
+### Merging of gene Clusters in fdata
+```{r}
+fdata$Cluster<-""
+which(((fdata$geneNameA %in% ssdgenesINssdClust) & (fdata$geneNameB %in% ssdgenesINwgdClust)) | ((fdata$geneNameA %in% ssdgenesINwgdClust) & (fdata$geneNameB %in% ssdgenesINssdClust)))->ssdmix
+which((fdata$geneNameA %in% ssdgenesINwgdClust) & (fdata$geneNameB %in% ssdgenesINwgdClust))->ssdother
+which((fdata$geneNameA %in% ssdgenesINssdClust) & (fdata$geneNameB %in% ssdgenesINssdClust))->ssdclean
+fdata$Cluster[ssdmix]<-"SSDCombination"
+fdata$Cluster[ssdother]<-"SSDinWGD"
+fdata$Cluster[ssdclean]<-"SSDinSSD"
+#
+which(((fdata$geneNameA %in% wgdgenesINwgdClust) & (fdata$geneNameB %in% wgdgenesINssdClust)) | ((fdata$geneNameA %in% wgdgenesINssdClust) & (fdata$geneNameB %in% wgdgenesINwgdClust)))->wgdmix
+which((fdata$geneNameA %in% wgdgenesINssdClust) & (fdata$geneNameB %in% wgdgenesINssdClust))->wgdother
+which((fdata$geneNameA %in% wgdgenesINwgdClust) & (fdata$geneNameB %in% wgdgenesINwgdClust))->wgdclean
+fdata$Cluster[wgdmix]<-"WGDCombination"
+fdata$Cluster[wgdother]<-"WGDinSSD"
+fdata$Cluster[wgdclean]<-"WGDinWGD"
+# correction
+fdata$Cluster[which(fdata$Cluster=="WGDinSSD" & fdata$Type=="SSD")]<-"SSDinWGD"
+#
+fdata$Cluster<-as.factor(fdata$Cluster)
+```
+
+# same as above but with geneLocalization data
+```{r}
+dupgeneloc$Cluster<-""
+which(((dupgeneloc$geneNameA %in% ssdgenesINssdClust) & (dupgeneloc$geneNameB %in% ssdgenesINwgdClust)) | ((dupgeneloc$geneNameA %in% ssdgenesINwgdClust) & (dupgeneloc$geneNameB %in% ssdgenesINssdClust)))->ssdmix
+which((dupgeneloc$geneNameA %in% ssdgenesINwgdClust) & (dupgeneloc$geneNameB %in% ssdgenesINwgdClust))->ssdother
+which((dupgeneloc$geneNameA %in% ssdgenesINssdClust) & (dupgeneloc$geneNameB %in% ssdgenesINssdClust))->ssdclean
+dupgeneloc$Cluster[ssdmix]<-"SSDCombination"
+dupgeneloc$Cluster[ssdother]<-"SSDinWGD"
+dupgeneloc$Cluster[ssdclean]<-"SSDinSSD"
+#
+which(((dupgeneloc$geneNameA %in% wgdgenesINwgdClust) & (dupgeneloc$geneNameB %in% wgdgenesINssdClust)) | ((dupgeneloc$geneNameA %in% wgdgenesINssdClust) & (dupgeneloc$geneNameB %in% wgdgenesINwgdClust)))->wgdmix
+which((dupgeneloc$geneNameA %in% wgdgenesINssdClust) & (dupgeneloc$geneNameB %in% wgdgenesINssdClust))->wgdother
+which((dupgeneloc$geneNameA %in% wgdgenesINwgdClust) & (dupgeneloc$geneNameB %in% wgdgenesINwgdClust))->wgdclean
+dupgeneloc$Cluster[wgdmix]<-"WGDCombination"
+dupgeneloc$Cluster[wgdother]<-"WGDinSSD"
+dupgeneloc$Cluster[wgdclean]<-"WGDinWGD"
+# correction
+dupgeneloc$Cluster[which(dupgeneloc$Cluster=="WGDinSSD" & dupgeneloc$Type=="SSD")]<-"SSDinWGD"
+#
+dupgeneloc$Cluster<-as.factor(dupgeneloc$Cluster)
+```
+
+### Same analysis in STRING Networks
+```{r}
+scerSTRINGPPI$Type1<-""
+scerSTRINGPPI$Type2<-""
+#
+scerSTRINGPPI$Type1[which(scerSTRINGPPI$protein1 %in% ssdgenes)]<-"SSD"
+scerSTRINGPPI$Type1[which(scerSTRINGPPI$protein1 %in% wgdgenes)]<-"WGD"
+scerSTRINGPPI$Type1[which(scerSTRINGPPI$protein1 %in% singletongenes)]<-"Singletons"
+#
+scerSTRINGPPI$Type2[which(scerSTRINGPPI$protein2 %in% ssdgenes)]<-"SSD"
+scerSTRINGPPI$Type2[which(scerSTRINGPPI$protein2 %in% wgdgenes)]<-"WGD"
+scerSTRINGPPI$Type2[which(scerSTRINGPPI$protein2 %in% singletongenes)]<-"Singletons"
+#
+scerSTRINGPPI$Type1<-as.factor(scerSTRINGPPI$Type1)
+scerSTRINGPPI$Type2<-as.factor(scerSTRINGPPI$Type2)
+#
+scerSTRINGPPI$Cluster1<-""
+scerSTRINGPPI$Cluster2<-""
+#
+scerSTRINGPPI$Cluster1[which(scerSTRINGPPI$protein1 %in% ssdgenesINssdClust)]<-"SSDinSSD"
+scerSTRINGPPI$Cluster1[which(scerSTRINGPPI$protein1 %in% wgdgenesINssdClust)]<-"WGDinSSD"
+scerSTRINGPPI$Cluster1[which(scerSTRINGPPI$protein1 %in% ssdgenesINwgdClust)]<-"SSDinWGD"
+scerSTRINGPPI$Cluster1[which(scerSTRINGPPI$protein1 %in% wgdgenesINwgdClust)]<-"WGDinWGD"
+scerSTRINGPPI$Cluster1[which(scerSTRINGPPI$protein1 %in% singletonsINssdClust)]<-"SingletonsinSSD"
+scerSTRINGPPI$Cluster1[which(scerSTRINGPPI$protein1 %in% singletonsINwgdClust)]<-"SingletonsinWGD"
+scerSTRINGPPI$Cluster1[which(scerSTRINGPPI$protein1 %in% singletonsINcomplementClust)]<-"SingletonsinComplement"
+#
+scerSTRINGPPI$Cluster2[which(scerSTRINGPPI$protein2 %in% ssdgenesINssdClust)]<-"SSDinSSD"
+scerSTRINGPPI$Cluster2[which(scerSTRINGPPI$protein2 %in% wgdgenesINssdClust)]<-"WGDinSSD"
+scerSTRINGPPI$Cluster2[which(scerSTRINGPPI$protein2 %in% ssdgenesINwgdClust)]<-"SSDinWGD"
+scerSTRINGPPI$Cluster2[which(scerSTRINGPPI$protein2 %in% wgdgenesINwgdClust)]<-"WGDinWGD"
+scerSTRINGPPI$Cluster2[which(scerSTRINGPPI$protein2 %in% singletonsINssdClust)]<-"SingletonsinSSD"
+scerSTRINGPPI$Cluster2[which(scerSTRINGPPI$protein2 %in% singletonsINwgdClust)]<-"SingletonsinWGD"
+scerSTRINGPPI$Cluster2[which(scerSTRINGPPI$protein2 %in% singletonsINcomplementClust)]<-"SingletonsinComplement"
+#
+```
+
+
+```{r, application of mergedf}
+hismodorf<-mergedf(hismodorf, 1)
+hismodprom<-mergedf(hismodprom, 1)
+spacers<-mergedf(spacers, 1)
+coddens<-mergedf(coddens, 4)
+nucPosClust<-mergedf(nucPosClust, 8)
+coords3d<-mergedf(coords3d, 1)
+mutasomeTSS<-mergedf(mutasomeTSS, 2)
+seqconsTSS<-mergedf(seqconsTSS, 2)
+phyloCSF<-mergedf(phyloCSF, 4)
+meanphyloCSF<-mergedf(meanphyloCSF, 4)
+strconsTSS<-mergedf(strconsTSS, 2)
+repTiming<-mergedf(repTiming, 4)
+synteny<-mergedf(synteny, 2)
+exprCons<-mergedf(exprCons, 1)
+pfamDom<-mergedf(pfamDom, 1)
+pfamAll<-mergedf(pfamAll,1)
+genestrands<-mergedf(genestrands, 4)
+strconsTSS<-mergedf(strconsTSS, 2)
+yeastgosimple<-mergedf(yeastgosimple, 2)
+scerSTRINGPPINumber<-mergedf(scerSTRINGPPINumber, 1)
+tandemRepsProm<-mergedf(tandemRepsProm,2)
+tandemRepsGene<-mergedf(tandemRepsGene,4)
+regcode<-mergedf(regcode, 4)
+
+```
+
+
+### Function for ggploting
+```{r}
+plotggplot<-function(df, variable, comparison, plottitle, boxplot=T, labs=c(main, x, y), comps){
+  if (class(comps) != "list"){
+  if (comparison == "geneType"){
+    my_comparisons <- list(c("SSD", "WGD"), c("SSD", "singletons"), c("WGD", "singletons"))
+  }
+  if (comparison == "geneClusterType"){
+  my_comparisons <- list(c("SSD_in_SSDCluster", "SSD_in_WGDCluster"), c("WGD_in_SSDCluster", "WGD_in_WGDCluster"), c("Singletons_in_SSDCluster", "Singletons_in_WGDCluster"), c("Singletons_in_SSDCluster", "Singletons_in_ComplementCluster"), c("Singletons_in_WGDCluster", "Singletons_in_ComplementCluster"))
+  }
+  }
+  if (class(comps) == "list"){
+    my_comparisons = comps
+  }
+  if (boxplot == T){
+  bplot<-ggboxplot(df, x = comparison, y = variable, fill = "geneType", title=plottitle, palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons) + coord_flip() + labs(title=labs[1], x=labs[2], y=labs[3])
+  }
+  if (boxplot == F){
+  bplot<-ggviolin(df, x = comparison, y = variable, fill = "geneType", title=plottitle, palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons) + coord_flip() + labs(title=labs[1], x=labs[2], y=labs[3])
+  }
+return(bplot)
+}
+#
+
+```
+
+### Function for spotting important differences with ANOVA
+```{r}
+# Gene Type
+numberofhismods<-22
+numberofcomparisons<-length(combn(levels(hismodprom$geneType), 2, simplify = F))
+#
+df<-data.frame(matrix(nrow = numberofhismods*numberofcomparisons, ncol=4));
+for(i in 2:23){
+  TukeyHSD(aov(hismodprom[,i]~hismodprom$geneType))->out; 
+  for(j in 1:length(rownames(out[[1]]))){
+    df[(i-2)*numberofcomparisons+j,1]<-colnames(hismodprom)[i]
+    df[(i-2)*numberofcomparisons+j,2]<-rownames(out[[1]])[j]
+    df[(i-2)*numberofcomparisons+j,3]<-as.numeric(sapply(out, '[[', j))
+    df[(i-2)*numberofcomparisons+j,4]<-as.numeric(sapply(out, '[[', j+3*numberofcomparisons))
+  }}
+aovhismodprom1<-df
+colnames(aovhismodprom1)<-c("HisMod", "Comparison", "Difference", "p-value")
+# Gene Cluster Type
+# careful on size definition
+numberofhismods<-22
+numberofcomparisons<-length(combn(levels(hismodprom$geneClusterType), 2, simplify = F))
+#
+df<-data.frame(matrix(nrow = numberofhismods*numberofcomparisons, ncol=4));
+for(i in 2:23){
+  TukeyHSD(aov(hismodprom[,i]~hismodprom$geneClusterType))->out; 
+  for(j in 1:length(rownames(out[[1]]))){
+    df[(i-2)*numberofcomparisons+j,1]<-colnames(hismodprom)[i]
+    df[(i-2)*numberofcomparisons+j,2]<-rownames(out[[1]])[j]
+    df[(i-2)*numberofcomparisons+j,3]<-as.numeric(sapply(out, '[[', j))
+    df[(i-2)*numberofcomparisons+j,4]<-as.numeric(sapply(out, '[[', j+3*numberofcomparisons))
+  }
+}  
+aovhismodprom2<-df
+colnames(aovhismodprom2)<-c("HisMod", "Comparison", "Difference", "p-value")
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure7_histoneModifications_Volcano.pdf", height=6, width=7)
+ggplot(aovhismodprom1, aes(x=Difference, y=-log10(`p-value`), size=abs(Difference), color=Comparison)) + geom_point() + geom_text_repel(label=aovhismodprom1$HisMod) + labs(title="Differential Epigenetic Marks in Gene Categories", x="Histone Mark Enrichment Difference", y="-log10(p-adjusted)", color="Gene Comparison", size="Absolute Difference")
+dev.off()
+```
+
+
+### Calculations for various list combinations
+```{r}
+duplist<-list(singletongenes, singletonsINcomplementClust, singletonsINssdClust, singletonsINwgdClust, ssdgenes, ssdgenesINssdClust, ssdgenesINwgdClust, wgdgenes, wgdgenesINssdClust, wgdgenesINwgdClust)
+genelist<-list(tata, tataless, lfreq, hfreq, essential, nessential, laurasiagenes, godwanagenes, antarcticagenes, tethysgenes, scerevisiae, saccharomyces, saccharomycetaceae, saccharomycetales, ascomycota, fungi)
+#
+ldf<-length(duplist)*length(genelist)
+#
+enrtable<-data.frame(DupList=vector(mode="character", length=ldf), GeneList=vector(mode="character", length=ldf), Enrichment=vector(mode="numeric", length=ldf), pvalue=vector(mode="numeric", length=ldf))
+#
+listone<-c(mode="character", length=ldf)
+listtwo<-c(mode="character", length=ldf)
+#
+names(duplist)<-c("singletons", "Singletons/Complement", "Singletons/SSD", "Singletons/WGD", "SSD", "SSD/SSD", "SSD/WGD", "WGD", "WGD/SSD", "WGD/WGD")
+names(genelist)<-c("TATA", "TATAless", "LowExpression", "HighExpression", "Essential", "Non-Essential", "Laurasia", "Godwana", "Antarctica", "Tethys", "Scerevisiae", "Saccharomyces", "saccharomycetaceae", "saccharomycetales", "ascomycota", "fungi")
+#
+for (i in 1:length(genelist)){
+  for (j in 1:length(duplist)){
+    output<-listenrichment(coords$Gene, duplist[[j]], genelist[[i]], 1000)
+    ind<-(i-1)*length(duplist)+j
+    listone[ind]<-names(duplist[j])
+    listtwo[ind]<-names(genelist[i])
+    enrtable[ind,3]<-output[[1]]
+    enrtable[ind,4]<-output[[2]]
+    print(c(names(duplist[j]), names(genelist[i]), output[[1]], output[[2]]))
+  }
+}
+enrtable[,1]<-listone
+enrtable[,2]<-listtwo
+#
+knitr::kable(enrtable, caption = "Yeast Gene List Enrichment Table")
+```
+The code above results in this table:
+
+| DupList               | GeneList           | Enrichment | pvalue |
+|-----------------------|--------------------|------------|--------|
+| singletons            | TATA               | 0.8039109  | 0.000  |
+| Singletons/Complement | TATA               | 0.7744385  | 0.000  |
+| Singletons/SSD        | TATA               | 0.8684573  | 0.029  |
+| Singletons/WGD        | TATA               | 0.8167683  | 0.002  |
+| SSD                   | TATA               | 1.6718506  | 0.000  |
+| SSD/SSD               | TATA               | 1.6972093  | 0.000  |
+| SSD/WGD               | TATA               | 1.6875337  | 0.000  |
+| WGD                   | TATA               | 1.6880263  | 0.000  |
+| WGD/SSD               | TATA               | 2.0119573  | 0.000  |
+| WGD/WGD               | TATA               | 1.6009157  | 0.000  |
+| singletons            | TATAless           | 1.0366307  | 0.000  |
+| Singletons/Complement | TATAless           | 1.0787756  | 0.000  |
+| Singletons/SSD        | TATAless           | 0.9772000  | 0.160  |
+| Singletons/WGD        | TATAless           | 0.9874464  | 0.252  |
+| SSD                   | TATAless           | 1.0522234  | 0.001  |
+| SSD/SSD               | TATAless           | 1.0661537  | 0.000  |
+| SSD/WGD               | TATAless           | 1.0683629  | 0.046  |
+| WGD                   | TATAless           | 1.0682504  | 0.000  |
+| WGD/SSD               | TATAless           | 0.9942879  | 0.484  |
+| WGD/WGD               | TATAless           | 1.0881402  | 0.000  |
+| singletons            | LowExpression      | 0.9424414  | 0.057  |
+| Singletons/Complement | LowExpression      | 1.0161542  | 0.398  |
+| Singletons/SSD        | LowExpression      | 0.8270492  | 0.055  |
+| Singletons/WGD        | LowExpression      | 0.8975718  | 0.159  |
+| SSD                   | LowExpression      | 1.3253519  | 0.002  |
+| SSD/SSD               | LowExpression      | 1.3654096  | 0.000  |
+| SSD/WGD               | LowExpression      | 1.2761573  | 0.095  |
+| WGD                   | LowExpression      | 1.4576292  | 0.000  |
+| WGD/SSD               | LowExpression      | 1.7344498  | 0.000  |
+| WGD/WGD               | LowExpression      | 1.3831873  | 0.000  |
+| singletons            | HighExpression     | 0.5591905  | 0.000  |
+| Singletons/Complement | HighExpression     | 0.5363036  | 0.000  |
+| Singletons/SSD        | HighExpression     | 0.5941546  | 0.001  |
+| Singletons/WGD        | HighExpression     | 0.6336879  | 0.001  |
+| SSD                   | HighExpression     | 1.6000094  | 0.000  |
+| SSD/SSD               | HighExpression     | 1.5269097  | 0.000  |
+| SSD/WGD               | HighExpression     | 1.9157274  | 0.002  |
+| WGD                   | HighExpression     | 2.7099364  | 0.000  |
+| WGD/SSD               | HighExpression     | 2.7003910  | 0.000  |
+| WGD/WGD               | HighExpression     | 2.7125033  | 0.000  |
+| singletons            | Essential          | 1.2525965  | 0.000  |
+| Singletons/Complement | Essential          | 1.3461713  | 0.000  |
+| Singletons/SSD        | Essential          | 1.0691810  | 0.150  |
+| Singletons/WGD        | Essential          | 1.2049206  | 0.000  |
+| SSD                   | Essential          | 1.1588569  | 0.011  |
+| SSD/SSD               | Essential          | 1.1480715  | 0.025  |
+| SSD/WGD               | Essential          | 1.2573229  | 0.031  |
+| WGD                   | Essential          | 0.3389235  | 0.000  |
+| WGD/SSD               | Essential          | 0.3523770  | 0.000  |
+| WGD/WGD               | Essential          | 0.3353056  | 0.000  |
+| singletons            | Non-Essential      | 0.7792292  | 0.000  |
+| Singletons/Complement | Non-Essential      | 0.7910199  | 0.000  |
+| Singletons/SSD        | Non-Essential      | 0.7725476  | 0.000  |
+| Singletons/WGD        | Non-Essential      | 0.7547999  | 0.000  |
+| SSD                   | Non-Essential      | 0.9699152  | 0.000  |
+| SSD/SSD               | Non-Essential      | 0.9881879  | 0.000  |
+| SSD/WGD               | Non-Essential      | 0.9680161  | 0.000  |
+| WGD                   | Non-Essential      | 1.1394390  | 0.000  |
+| WGD/SSD               | Non-Essential      | 1.1359682  | 0.000  |
+| WGD/WGD               | Non-Essential      | 1.1403724  | 0.000  |
+| singletons            | Laurasia           | 1.0848432  | 0.000  |
+| Singletons/Complement | Laurasia           | 1.0437330  | 0.038  |
+| Singletons/SSD        | Laurasia           | 1.0433818  | 0.139  |
+| Singletons/WGD        | Laurasia           | 1.2285444  | 0.000  |
+| SSD                   | Laurasia           | 1.0360755  | 0.163  |
+| SSD/SSD               | Laurasia           | 1.0183329  | 0.343  |
+| SSD/WGD               | Laurasia           | 1.1491243  | 0.050  |
+| WGD                   | Laurasia           | 1.1909500  | 0.000  |
+| WGD/SSD               | Laurasia           | 1.0822033  | 0.148  |
+| WGD/WGD               | Laurasia           | 1.2201938  | 0.000  |
+| singletons            | Godwana            | 1.0636195  | 0.003  |
+| Singletons/Complement | Godwana            | 1.0036091  | 0.454  |
+| Singletons/SSD        | Godwana            | 1.0967064  | 0.090  |
+| Singletons/WGD        | Godwana            | 1.1816136  | 0.000  |
+| SSD                   | Godwana            | 1.0377709  | 0.264  |
+| SSD/SSD               | Godwana            | 1.0380307  | 0.287  |
+| SSD/WGD               | Godwana            | 1.0953169  | 0.228  |
+| WGD                   | Godwana            | 1.2449702  | 0.001  |
+| WGD/SSD               | Godwana            | 1.0078859  | 0.463  |
+| WGD/WGD               | Godwana            | 1.3087263  | 0.000  |
+| singletons            | Antarctica         | 1.1125062  | 0.001  |
+| Singletons/Complement | Antarctica         | 1.2192226  | 0.001  |
+| Singletons/SSD        | Antarctica         | 1.2046300  | 0.025  |
+| Singletons/WGD        | Antarctica         | 0.8344969  | 0.050  |
+| SSD                   | Antarctica         | 1.0625802  | 0.259  |
+| SSD/SSD               | Antarctica         | 1.1067349  | 0.191  |
+| SSD/WGD               | Antarctica         | 0.9859582  | 0.468  |
+| WGD                   | Antarctica         | 1.0661012  | 0.245  |
+| WGD/SSD               | Antarctica         | 1.2753434  | 0.126  |
+| WGD/WGD               | Antarctica         | 1.0098324  | 0.428  |
+| singletons            | Tethys             | 0.9181781  | 0.000  |
+| Singletons/Complement | Tethys             | 0.9860136  | 0.000  |
+| Singletons/SSD        | Tethys             | 0.9468643  | 0.009  |
+| Singletons/WGD        | Tethys             | 0.8136048  | 0.034  |
+| SSD                   | Tethys             | 0.9895142  | 0.001  |
+| SSD/SSD               | Tethys             | 1.0285890  | 0.000  |
+| SSD/WGD               | Tethys             | 0.9244729  | 0.237  |
+| WGD                   | Tethys             | 0.8110477  | 0.029  |
+| WGD/SSD               | Tethys             | 0.9435039  | 0.176  |
+| WGD/WGD               | Tethys             | 0.7754279  | 0.002  |
+| singletons            | Scerevisiae        | 0.8738564  | 0.000  |
+| Singletons/Complement | Scerevisiae        | 0.7087210  | 0.000  |
+| Singletons/SSD        | Scerevisiae        | 1.0944802  | 0.120  |
+| Singletons/WGD        | Scerevisiae        | 1.2062742  | 0.005  |
+| SSD                   | Scerevisiae        | 0.2114400  | 0.000  |
+| SSD/SSD               | Scerevisiae        | 0.2049327  | 0.000  |
+| SSD/WGD               | Scerevisiae        | 0.2434249  | 0.000  |
+| WGD                   | Scerevisiae        | 0.7229048  | 0.001  |
+| WGD/SSD               | Scerevisiae        | 0.4198288  | 0.001  |
+| WGD/WGD               | Scerevisiae        | 0.8044072  | 0.046  |
+| singletons            | Saccharomyces      | 1.0624883  | 0.158  |
+| Singletons/Complement | Saccharomyces      | 1.0513675  | 0.325  |
+| Singletons/SSD        | Saccharomyces      | 0.9947143  | 0.424  |
+| Singletons/WGD        | Saccharomyces      | 1.0558478  | 0.318  |
+| SSD                   | Saccharomyces      | 0.6547893  | 0.087  |
+| SSD/SSD               | Saccharomyces      | 0.7908561  | 0.280  |
+| SSD/WGD               | Saccharomyces      | 0.2713826  | 0.112  |
+| WGD                   | Saccharomyces      | 0.8059315  | 0.226  |
+| WGD/SSD               | Saccharomyces      | 1.1701170  | 0.223  |
+| WGD/WGD               | Saccharomyces      | 0.7079957  | 0.175  |
+| singletons            | saccharomycetaceae | 1.1030640  | 0.017  |
+| Singletons/Complement | saccharomycetaceae | 0.8115745  | 0.036  |
+| Singletons/SSD        | saccharomycetaceae | 1.6892537  | 0.000  |
+| Singletons/WGD        | saccharomycetaceae | 1.2914095  | 0.017  |
+| SSD                   | saccharomycetaceae | 0.4096779  | 0.001  |
+| SSD/SSD               | saccharomycetaceae | 0.3534357  | 0.000  |
+| SSD/WGD               | saccharomycetaceae | 0.6064079  | 0.182  |
+| WGD                   | saccharomycetaceae | 1.2744581  | 0.025  |
+| WGD/SSD               | saccharomycetaceae | 1.0458568  | 0.340  |
+| WGD/WGD               | saccharomycetaceae | 1.3359329  | 0.013  |
+| singletons            | saccharomycetales  | 1.1879804  | 0.000  |
+| Singletons/Complement | saccharomycetales  | 1.2769134  | 0.000  |
+| Singletons/SSD        | saccharomycetales  | 1.0631338  | 0.262  |
+| Singletons/WGD        | saccharomycetales  | 1.1136239  | 0.121  |
+| SSD                   | saccharomycetales  | 0.2099483  | 0.000  |
+| SSD/SSD               | saccharomycetales  | 0.1408756  | 0.000  |
+| SSD/WGD               | saccharomycetales  | 0.4350736  | 0.017  |
+| WGD                   | saccharomycetales  | 1.2423547  | 0.013  |
+| WGD/SSD               | saccharomycetales  | 1.4069264  | 0.054  |
+| WGD/WGD               | saccharomycetales  | 1.1980986  | 0.040  |
+| singletons            | ascomycota         | 1.1304765  | 0.001  |
+| Singletons/Complement | ascomycota         | 1.0471556  | 0.251  |
+| Singletons/SSD        | ascomycota         | 1.2033233  | 0.040  |
+| Singletons/WGD        | ascomycota         | 1.2747407  | 0.012  |
+| SSD                   | ascomycota         | 0.3811096  | 0.000  |
+| SSD/SSD               | ascomycota         | 0.4813647  | 0.001  |
+| SSD/WGD               | ascomycota         | 0.0929140  | 0.000  |
+| WGD                   | ascomycota         | 1.0824911  | 0.230  |
+| WGD/SSD               | ascomycota         | 0.9013867  | 0.453  |
+| WGD/WGD               | ascomycota         | 1.1311931  | 0.152  |
+| singletons            | fungi              | 1.0135515  | 0.025  |
+| Singletons/Complement | fungi              | 1.0538811  | 0.000  |
+| Singletons/SSD        | fungi              | 0.9532257  | 0.015  |
+| Singletons/WGD        | fungi              | 0.9736888  | 0.088  |
+| SSD                   | fungi              | 1.2905210  | 0.000  |
+| SSD/SSD               | fungi              | 1.2827307  | 0.000  |
+| SSD/WGD               | fungi              | 1.3871397  | 0.000  |
+| WGD                   | fungi              | 1.1249886  | 0.000  |
+| WGD/SSD               | fungi              | 1.1295831  | 0.001  |
+| WGD/WGD               | fungi              | 1.1237530  | 0.000  |
+
+### Plotting quantitative data in the form of boxplots
+
+### Quantification of single variables against gene Type and gene Clusters
+
+```{r}
+my_comparisons1 <- list(c("SSD", "WGD"), c("SSD", "singletons"), c("WGD", "singletons"))
+#
+my_comparisons2 <- list(c("SSD_in_SSDCluster", "SSD_in_WGDCluster"), c("WGD_in_SSDCluster", "WGD_in_WGDCluster"), c("Singletons_in_SSDCluster", "Singletons_in_WGDCluster"), c("Singletons_in_SSDCluster", "Singletons_in_ComplementCluster"), c("Singletons_in_WGDCluster", "Singletons_in_ComplementCluster"))
+my_comparisons3 <- list(c("Singletons_in_ComplementCluster", "SSD_in_SSDCluster"), c("Singletons_in_ComplementCluster", "WGD_in_WGDCluster"), c("WGD_in_WGDCluster", "SSD_in_SSDCluster"))
+
+bplot<-ggboxplot(nucPosClust, x = "geneType", y = "trNoise", fill = "geneType", title="transcriptional variability", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons1) + coord_flip() #+ stat_compare_means(label.y = max(1))
+bplot
+```
+
+
+### Plotting fdata
+```{r}
+# changing column name for duplication gene type
+colnames(fdata)[20]<-"geneType"
+my_comparisons1 <- list(c("SSD", "WGD"))
+#
+my_comparisons2 <- list(c("SSDCombination", "SSDinSSD"), c("SSDinSSD", "SSDinWGD"), c("SSDCombination", "SSDinWGD"), c("WGDCombination", "WGDinWGD"), c("WGDinWGD", "WGDinSSD"), c("WGDCombination", "WGDinSSD"), c("WGDinWGD", "SSDinSSD"))
+my_comparisons3 <- list(c("SSDCombination", "WGDCombination"), c("WGDinWGD", "SSDinSSD"), c("WGDinSSD", "SSDinWGD"))
+
+bplot<-ggboxplot(fdata, x = "geneType", y = "nucCor_SEQ", fill = "geneType", title="Nucleosome Pattern Similarity", palette = c("firebrick4",  "olivedrab")) + stat_compare_means(comparisons = my_comparisons1) + coord_flip() #+ stat_compare_means(label.y = max(1))
+bplot
+#
+# par(mar=c(3, 15, 5, 2));plot(TukeyHSD(aov(fdata$MeanNeighbACS ~ fdata$Cluster)), las=1)
+```
+### Sequence Conservation around TSS
+
+```{r}
+plot(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneType=="singletons"),4:103], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS",  main="Sequence Conservation around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(0.2, 0.85))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneType=="SSD"),4:103], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneType=="WGD"),4:103], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+
+# phyloCSF
+```{r}
+plot(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneType=="singletons"),6:104], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="phyloCSF Score", xlab="distance from TSS",  main="Sequence Conservation around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(0.55, 0.9))
+lines(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneType=="SSD"),6:104], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="phyloCSF Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneType=="WGD"),6:104], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="phyloCSF Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+
+### Singletons in Clusters
+```{r}
+plot(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneClusterType=="Singletons_in_ComplementCluster"),4:103], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS",  main="Sequence Conservation around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(0.2, 0.8))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneClusterType=="Singletons_in_SSDCluster"),4:103], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneClusterType=="Singletons_in_WGDCluster"),4:103], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("in Complement", "in SSD", "in WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+
+## phyloCSF
+```{r}
+plot(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneClusterType=="Singletons_in_ComplementCluster"),6:104], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS",  main="Sequence Conservation around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(0.6, 0.9))
+lines(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneClusterType=="Singletons_in_SSDCluster"),6:104], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.6, 0.95))
+lines(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneClusterType=="Singletons_in_WGDCluster"),6:104], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.6, 0.95))
+legend("bottomright", c("in Complement", "in SSD", "in WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+
+### SSD in Clusters
+```{r}
+plot(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneType=="SSD"),4:103], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS",  main="Sequence Conservation around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(0.15, 0.9))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneClusterType=="SSD_in_SSDCluster"),4:103], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneClusterType=="SSD_in_WGDCluster"),4:103], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("all SSD", "in SSD cluster", "in WGD cluster"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+
+### PhyloCSF
+```{r}
+plot(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneType=="SSD"),6:104], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS",  main="Sequence Conservation around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(0.55, 0.95))
+lines(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneClusterType=="SSD_in_SSDCluster"),6:104], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneClusterType=="SSD_in_WGDCluster"),6:104], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("all SSD", "in SSD cluster", "in WGD cluster"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+
+
+### WGD in Clusters
+```{r}
+plot(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneType=="WGD"),4:103], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS",  main="Sequence Conservation around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(0.1, 0.9))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneClusterType=="WGD_in_WGDCluster"),4:103], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneClusterType=="WGD_in_SSDCluster"),4:103], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("all WGD", "in WGD cluster", "in SSD cluster"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+This pattern is quite interesting as it shows that conservation is relaxed in the promoters of genes of all gene type, but is dependent of the domain
+```{r}
+seqconsTSS$MeanPromCons<-rowMeans(seqconsTSS[,43:52])
+plotggplot(seqconsTSS, "MeanPromCons", "geneClusterType", "Mean Promoter Sequence Conservation", T, labs=c("Sequence conservation at Gene Promoters", "Mean Promoter Sequence Conservation (-200,-50)", "Gene Cluster Type"), comps="default")
+```
+
+### PhyloCSF
+```{r}
+phyloCSF$MeanPromCons<-rowMeans(phyloCSF[,10:52])
+# per Gene Type
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/SupplementaryFigure_phyloCSFPromoter_BoxplotGeneType.pdf", height=5, width=4)
+ggboxplot(phyloCSF, y="MeanPromCons", x="geneType", fill = "geneType", title="Average Gene Conservation Score",  palette = c("firebrick4",  "olivedrab", "steelblue4")) + labs(title="Sequence conservation at Promoters", x="Gene Type", y="Mean phyloCSF in [-200,50] from TSS") + stat_compare_means(comparisons = my_comparisons1)
+dev.off()
+#
+# per Cluster Type
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/SupplementaryFigure_phyloCSFPromoter_BoxplotClusterType.pdf", height=4, width=10)
+plotggplot(phyloCSF, "MeanPromCons", "geneClusterType", "Mean Promoter Sequence Conservation", F, labs=c("Sequence conservation at Gene Promoters", "Gene Cluster Type", "Mean Promoter Sequence Conservation (-200,-50)"), comps="default")
+dev.off()
+```
+
+
+### Nucleosome positioning around TSS
+
+1. Different patterns in nucleosome positioning patterns, show more complex structure in both SSD and WGD genes
+```{r}
+plot(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneType=="singletons"),18:117]), type="l", col="steelblue4", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95), main="Nucleosome Occupancy around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3)
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneType=="SSD"),18:117]), type="l", col="firebrick4", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneType=="WGD"),18:117]), type="l", col="olivedrab", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+
+```
+
+A difference that is strongly supported statistically
+```{r}
+#boxplot(rowMeans(nucPosClust[which(nucPosClust$geneType=="WGD"),47:67]), rowMeans(nucPosClust[which(nucPosClust$geneType=="SSD"),47:67]), rowMeans(nucPosClust[which(nucPosClust$geneType=="singletons"),47:67]), col="steelblue4", las=1, names=c("WGD", "SSD", "Singletons"), cex.axis=1.3, cex.lab=1.5, main="Mean Occupancy in NFR (-200,0)", cex.main=2)
+#
+meanNucdf<-data.frame(MeanNucOcc=c(rowMeans(nucPosClust[which(nucPosClust$geneType=="WGD"),47:67]), rowMeans(nucPosClust[which(nucPosClust$geneType=="SSD"),47:67]), rowMeans(nucPosClust[which(nucPosClust$geneType=="singletons"),47:67])), geneType=c(rep("WGD", length(which(nucPosClust$geneType=="WGD"))), rep("SSD", length(which(nucPosClust$geneType=="SSD"))), rep("Singletons", length(which(nucPosClust$geneType=="singletons")))))
+meanNucdf$geneType<-factor(meanNucdf$geneType, levels=c("SSD", "WGD", "Singletons"))
+my_comparisons <- list(c("SSD", "WGD"), c("SSD", "Singletons"), c("WGD", "Singletons"))
+bplot<-ggboxplot(meanNucdf, x = "geneType", y = "MeanNucOcc", fill = "geneType", title="Mean Nucleosome Occupancy in Promoter (-200,0)", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons)
+bplot
+```
+
+2. However the situation is more complex when looking at the particular areas where the genes come from.
+For singletons there are no changes. Independent of position they exhibit the same patterns
+```{r}
+plot(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneClusterType=="Singletons_in_ComplementCluster"),18:117]), type="l", col="steelblue4", lwd=5, las=1, ylab="Mean Score", xlab="distance from TSS", ylim=c(0.55, 0.95), main="Singletons Nucleosome Occupancy", cex.main=2, cex.axis=1.2, cex.lab=1.4)
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneClusterType=="Singletons_in_SSDCluster"),18:117]), type="l", col="firebrick4", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneClusterType=="Singletons_in_WGDCluster"),18:117]), type="l", col="olivedrab", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("Singletons/Complement", "Singletons/SSD", "Singletons/WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.3)
+
+```
+
+3. The situation is different in SSD, where SSD in WGD clusters appear to have a deeper NFR compared to the one in general (in SSD clusters)
+```{r}
+plot(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneType=="SSD"),18:117]), type="l", col="firebrick2", lwd=5, las=1, ylab="Mean Score", xlab="distance from TSS", ylim=c(0.55, 0.95), main="SSD genes Nucleosome Occupancy", cex.main=2, cex.axis=1.2, cex.lab=1.4)
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneClusterType=="SSD_in_SSDCluster"),18:117]), type="l", col="firebrick4", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneClusterType=="SSD_in_WGDCluster"),18:117]), type="l", col="olivedrab", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("SSD/All", "SSD/SSD", "SSD/WGD"), fill=c("firebrick2", "firebrick4", "olivedrab"), bty="n", cex=1.3)
+abline(v=-225, col="black", lty=3, lwd=3)
+abline(v=-50, col="black", lty=3, lwd=3)
+```
+
+the difference however is not significant
+
+```{r}
+meanNucdf<-data.frame(MeanNucOcc=c(rowMeans(nucPosClust[which(nucPosClust$geneClusterType=="SSD_in_SSDCluster"), 45:63]), rowMeans(nucPosClust[which(nucPosClust$geneClusterType=="SSD_in_WGDCluster"), 45:63])), geneType=c(rep("SSD_in_SSD", length(which(nucPosClust$geneClusterType=="SSD_in_SSDCluster"))), rep("SSD_in_WGD", length(which(nucPosClust$geneClusterType=="SSD_in_WGDCluster")))))
+my_comparisons <- list(c("SSD_in_SSD", "SSD_in_WGD"))
+bplot<-ggboxplot(meanNucdf, x = "geneType", y = "MeanNucOcc", fill = "geneType", title="Mean Nucleosome Occupancy in Promoter (-225,-50)", palette = c("firebrick4",  "olivedrab")) + stat_compare_means(comparisons = my_comparisons)
+bplot
+```
+
+4. Comparing the WGD genes depending on the domain shows an opposite trend
+```{r}
+plot(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneType=="WGD"),18:117]), type="l", col="olivedrab3", lwd=5, las=1, ylab="Mean Score", xlab="distance from TSS", ylim=c(0.55, 0.95), main="WGD genes Nucleosome Occupancy", cex.main=2, cex.axis=1.2, cex.lab=1.4)
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneClusterType=="WGD_in_WGDCluster"),18:117]), type="l", col="olivedrab4", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneClusterType=="WGD_in_SSDCluster"),18:117]), type="l", col="firebrick4", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("WGD/All", "WGD/WGD", "WGD/SSD"), fill=c("olivedrab3", "olivedrab4", "firebrick4"), bty="n", cex=1.3)
+abline(v=-225, col="black", lty=3, lwd=3)
+abline(v=-50, col="black", lty=3, lwd=3)
+```
+
+```{r}
+nucPosClust$MeanNucOcc<-rowMeans(nucPosClust[,45:63], na.rm=T)
+nucPosClust$MeanNucOcc[which(nucPosClust$MeanNucOcc>1)]<-1
+plotggplot(nucPosClust, "MeanNucOcc", "geneClusterType", "Mean Promoter Nucleosome Occupancy (-200,-50)", T, labs=c("Nucleosome Occupancy at promoters", "Mean Promoter Nucleosome Occupancy (-200,-50)", "Gene Cluster Type"), comps="default")
+```
+### ** CONCLUSION, NUCLEOSOMES: Patterns don't change depending on domain. Chromatin patterns resistant to environment. **
+
+### Similar Analysis with Nucleosome Potential constraints
+
+Different patterns in nucleosome positioning patterns, show more complex structure in both SSD and WGD genes
+```{r}
+plot(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneType=="singletons"),4:103], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS",  main="Chromatin Structure Constraint", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(-0.2, 1))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneType=="SSD"),4:103],  na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneType=="WGD"),4:103],  na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+legend("topright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+Singletons in various contexts
+
+## This should be a Figure!!!
+```{r}
+plot(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="Singletons_in_ComplementCluster"),4:103], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS",  main="Singletons: Chromatin Structure Constraint", cex.main=1.8, cex.lab=1.5, cex.axis=1.3, ylim=c(-0.2, 1))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="Singletons_in_SSDCluster"),4:103],  na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="Singletons_in_WGDCluster"),4:103],  na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+legend("topright", c("Complement", "SSD Clusters", "WGD Clusters"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+SSD in various contexts
+
+```{r}
+plot(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="SSD_in_SSDCluster"),4:103], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS",  main="SSD genes: Chromatin Structure Constraint", cex.main=1.8, cex.lab=1.5, cex.axis=1.3, ylim=c(-0.2, 1.1))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="SSD_in_WGDCluster"),4:103],  na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+legend("topright", c("SSD Clusters", "WGD Clusters"), fill=c("firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+WGD in various contexts
+
+```{r}
+plot(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="WGD_in_WGDCluster"),4:103], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS",  main="WGD genes: Chromatin Structure Constraint", cex.main=1.8, cex.lab=1.5, cex.axis=1.3, ylim=c(-0.2, 1.1))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="WGD_in_SSDCluster"),4:103],  na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+legend("topright", c("WGD Clusters", "SSD Clusters"), fill=c("olivedrab", "firebrick4"), bty="n", cex=1.5)
+```
+```{r}
+mutasomeTSS$MeanPromConstraint<-rowMeans(mutasomeTSS[,29:42], na.rm=T)
+strConsPlot<-plotggplot(mutasomeTSS, "MeanPromConstraint", "geneClusterType", "Mean Promoter Structural Constraint (-200,-50)", T, labs=c("Chromatin Constraints at promoters", "Mean Promoter Structural Constraint (-200,-50)", "Gene Cluster Type"), comps=list(c("Singletons_in_WGDCluster", "Singletons_in_ComplementCluster"), c("Singletons_in_SSDCluster", "Singletons_in_ComplementCluster")))
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/Supplementary_StrucConstraint_boxplot_ClusterTypes.pdf", height=6, width=10.5)
+strConsPlot
+dev.off()
+```
+
+### And with SymCurv Robustness
+Different patterns in nucleosome positioning patterns, show more complex structure in both SSD and WGD genes
+```{r}
+plot(seq(-495, 495, 10), (-log10(colMeans(strconsTSS[which(strconsTSS$geneType=="singletons"),4:103], na.rm=T))), type="l", col="steelblue4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS",  main="Chromatin Structure Constraint", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(2.83,3))
+lines(seq(-495, 495, 10), (-log10(colMeans(strconsTSS[which(strconsTSS$geneType=="SSD"),4:103], na.rm=T))), type="l", col="firebrick4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+lines(seq(-495, 495, 10), (-log10(colMeans(strconsTSS[which(strconsTSS$geneType=="WGD"),4:103], na.rm=T))), type="l", col="olivedrab", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+legend("topright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+```
+
+
+
+### Correlations of quantities studied
+Using an easy and straightforward merge call we can merge dataframes and check for correlations
+```{r}
+nucPosClust$NFROcc<-rowMeans(nucPosClust[,47:67], na.rm=T)
+colnames(nucPosClust)[8]<-"Gene"
+df<-merge(nucPosClust, coords3d, by="Gene", all=F) #all=F keeps only intersection=commong genes
+cor.test(df$distTel, df$polar, use="complete.obs")
+```
+
+Comparison of Seq/Structural Constraint with other features
+```{r}
+colnames(seqconsTSS)[2]<-"Gene"
+colnames(mutasomeTSS)[2]<-"Gene"
+#
+df<-merge(seqconsTSS, coords3d, by="Gene", all=F) #all=F keeps only intersection=commong genes
+cor.test(df$MeanPromCons, df$polar, use="complete.obs")
+```
+
+
+### Functional Enrichments
+WGD genes are generally enriched in ribosomal functions and proteins
+```{r}
+library(gprofiler2)
+source("~/Dropbox/Programs/R_functions/gProfPlot2.R")
+gProfPlot2(as.character(wgdgenes), "scerevisiae", 10, "WGD genes")
+```
+
+while SSD genes are mostly involved in metabolism, transport and transmembrane proteins 
+
+```{r}
+gProfPlot2(as.character(ssdgenes), "scerevisiae", 10, "SSD genes")
+```
+
+### WGD in clusters
+```{r}
+gProfPlot2(as.character(wgdgenesINwgdClust), "scerevisiae", 10, "WGD/WGD")
+gProfPlot2(as.character(wgdgenesINssdClust), "scerevisiae", 10, "WGD/SSD")
+```
+
+### SSD in clusters
+```{r}
+gProfPlot2(as.character(ssdgenesINssdClust), "scerevisiae", 10, "SSD/SSD")
+gProfPlot2(as.character(ssdgenesINwgdClust), "scerevisiae", 10, "SSD/WGD")
+```
+
+### Singletons
+```{r}
+gProfPlot2(as.character(singletonsINcomplementClust), "scerevisiae", 10, "Singletons/Complement")
+gProfPlot2(as.character(singletonsINssdClust), "scerevisiae", 10, "singletons/SSD")
+gProfPlot2(as.character(singletonsINwgdClust), "scerevisiae", 10, "singletons/WGD")
+```
+
+It seems that functional enrichments are persistent independently of domains.
+### CONCLUSION: Functionalities are also largely independent of the region.
+
+### Strand Enrichments in Triplets 
+This are, as may be seen in the tables below, not very significant.
+γγ
+#### Gene Numbers
+
+| StrandTrio | --- | --+ | -+-  | -++ | +-- | +-+  | ++- | +++ |
+|------------|-----|-----|------|-----|-----|------|-----|-----|
+| SSD        | 112 | 133 | 155  | 116 | 133 | 137  | 118 | 90  |
+| WGD        | 120 | 144 | 172  | 125 | 144 | 152  | 126 | 100 |
+| Singletons | 458 | 638 | 774  | 636 | 610 | 735  | 586 | 518 |
+| Total      | 706 | 872 | 1045 | 858 | 876 | 1023 | 861 | 798 |
+
+#### Gene Ratios
+| StrandTrio | ---    | --+    | -+-    | -++    | +--    | +-+    | ++-    | +++    |
+|------------|--------|--------|--------|--------|--------|--------|--------|--------|
+| SSD        | 0.1127 | 0.1338 | 0.1559 | 0.1167 | 0.1338 | 0.1378 | 0.1187 | 0.0905 |
+| WGD        | 0.1108 | 0.1330 | 0.1588 | 0.1154 | 0.1330 | 0.1404 | 0.1163 | 0.0923 |
+| Singletons | 0.0924 | 0.1288 | 0.1562 | 0.1284 | 0.1231 | 0.1483 | 0.1183 | 0.1045 |
+| Total      | 0.1003 | 0.1239 | 0.1485 | 0.1219 | 0.1244 | 0.1453 | 0.1223 | 0.1134 |
+
+
+
+## Results
+
+### 1. Duplicate localization in chromosomes
+
+```{r}
+source("~/Dropbox/Programs/R_functions/yeastgenomeplot.R")
+chromosomes<-read.table("~/Dropbox/Data/yeast_interactions_noble/saccer2_R.genome")[,1:4]
+#
+ssdclusters<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/SSD.merge10kclusters", header=F, sep="\t")
+i<-which(ssdclusters[,3]-ssdclusters[,2]>10000)
+ssdclusters[,4]<-3
+yeast.genome.plot(chromosomes, ssdclusters[i,], "SSD Clusters", "olivedrab", "firebrick4")
+#
+wgdclusters<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/WGD.merge10kclusters", header=F, sep="\t")
+i<-which(wgdclusters[,3]-wgdclusters[,2]>10000)
+wgdclusters[,4]<--3
+yeast.genome.plot(chromosomes, wgdclusters[i,], "WGD Clusters", "olivedrab", "olivedrab")
+#
+bothssdwgdclusters<-rbind(ssdclusters, wgdclusters)
+i<-which(bothssdwgdclusters[,3]-bothssdwgdclusters[,2]>10000)
+yeast.genome.plot(chromosomes, bothssdwgdclusters[i,], "Duplicate Gene Clusters", "firebrick4", "olivedrab")
+```
+
+### 2. Linear distance of duplicate genes
+
+
+### 3. Distance of duplicate genes in 3-dimensional space (?Data)
+
+
+### 4. Chromosomal localization of duplicates with reference to centromeres and telomeres
+
+
+### 5. Structural conservation in duplicated genes
+
+
+### 6. Sequence vs structural conservation in gene duplicates
+
+
+### 7. Regulatory potential of gene duplicates
+
+### Reading RegCode and checking enrichments of TFs vs genes
+
+```{r}
+regcode<-read.delim("~/Dropbox/Data/Yeast_RegCode/sacCer2_Promoters_min300_plus_100_vs_Harbison_RegCode.bed", header=F, sep="\t")
+colnames(regcode)<-c("chrom", "start", "end", "Gene", "TFNo", "TFs")
+x<-which(regcode$TFs!=".")
+regcode<-regcode[x,]
+```
+
+Creating a dataset of TFs vs Genes
+```{r}
+regcodeassociations<-""
+for(i in 1:length(regcode$TFs)){
+tflist<-unlist(strsplit(as.character(regcode$TFs[i]), ","))
+mygene<-regcode$gene[i]
+for(j in 1:length(tflist)){
+  regcodeassociations<-rbind(regcodeassociations, paste(tflist[j], mygene))
+}
+}
+```
+
+Reading of the file created above
+```{r}
+regCodAssoc<-read.delim("~/Dropbox/Data/Yeast_RegCode/sacCer2_TF_to_gene_associations.tsv", header=F, sep="\t")
+colnames(regCodAssoc)<-c("TF", "Gene")
+regCodAssoc<-mergedf(regCodAssoc, 2)
+tab<-cbind(table(regCodAssoc$TF, regCodAssoc$geneType), table(regCodAssoc$TF))
+which(tab[,4]>=20 & tab[,4]<=1500)->x
+hcols<-colorRampPalette(c("steelblue4", "white", "firebrick4"))(256)
+par(mar=c(15,5,5,8));heatmap.2(tab[x,1:3]/tab[x,4], scale="column", col=hcols, tracecol = "black", density.info = "none", key.title = "Enrichment", key.xlab = "Enrichment", cexRow = 0.8, cexCol = 1.5)
+#
+tab<-cbind(table(regCodAssoc$TF, regCodAssoc$geneClusterType), table(regCodAssoc$TF))
+which(tab[,8]>=20 & tab[,8]<=2000)->x
+hcols<-colorRampPalette(c("steelblue4", "white", "firebrick4"))(256)
+collabs<-c("SSD/SSDCluster", "WGD/WGDCluster", "Singletons/SSDCluster",  "Singletons/WGDCluster", "Singletons/Complement")  
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/TFAssociationEnr_geneCluster_heatmap.pdf", height=15, width=6);heatmap.2(tab[x,c(1,4:7)]/tab[x,8], hclustfun = function(x) hclust(x,method = 'ward.D2'), scale="column", col=hcols, tracecol = "black", density.info = "none", trace = "none", key.title = "Enrichment", key.xlab = "Enrichment", cexRow = 0.6, cexCol = 1, mar=c(15,4), labCol = collabs);dev.off()
+
+```
+
+
+#### Association rules of TFs
+```{r}
+regcode<-read.delim("~/Dropbox/Data/Yeast_RegCode/sacCer2_Promoters_min300_plus_100_vs_Harbison_RegCode.bed", header=F, sep="\t")
+colnames(regcode)<-c("chrom", "start", "end", "gene", "TFNo", "TFs")
+x<-which(regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+rules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+rules <- sort(rules, by='confidence', decreasing = TRUE)
+summary(rules)
+topRules <- rules[1:30]
+plot(topRules)
+plot(topRules, method="graph")
+```
+
+#### Repeating the analysis for SSD and WGD separately
+```{r}
+par(mfrow=c(1,3))
+#plot(topRules, method="graph")
+#wgdgenes<-c(gedup$GA[which(gedup$Type=="WGD")], gedup$GB[which(gedup$Type=="WGD")])
+#ssdgenes<-c(gedup$GA[which(gedup$Type=="SSD")], gedup$GB[which(gedup$Type=="SSD")])
+# SSD regcode
+x<-which(regcode$gene %in% ssdgenes & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+ssdrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+ssdrules <- sort(ssdrules, by='confidence', decreasing = TRUE)
+summary(ssdrules)
+ssdtopRules <- ssdrules[1:30]
+plot(ssdtopRules, method="graph")
+#
+# WGD regcode
+x<-which(regcode$gene %in% wgdgenes & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+wgdrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+wgdrules <- sort(wgdrules, by='confidence', decreasing = TRUE)
+summary(wgdrules)
+wgdtopRules <- wgdrules[1:30]
+plot(wgdtopRules, method="graph")
+# Singletons regcode
+x<-which(regcode$gene %in% singletongenes & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+singletonsrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+singletonsrules <- sort(singletonsrules, by='confidence', decreasing = TRUE)
+summary(singletonsrules)
+singletonstopRules <- singletonsrules[1:30]
+plot(singletonstopRules, method="graph")
+#
+# Singletons Complement regcode
+x<-which(regcode$gene %in% singletonsINcomplementClust & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+singletonsrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+singletonsrules <- sort(singletonsrules, by='confidence', decreasing = TRUE)
+summary(singletonsrules)
+singletonComptopRules <- singletonsrules[1:30]
+plot(singletonComptopRules, method="graph")
+# Singletons SSD regcode
+x<-which(regcode$gene %in% singletonsINssdClust & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+singletonsrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+singletonsrules <- sort(singletonsrules, by='confidence', decreasing = TRUE)
+summary(singletonsrules)
+singletonSSDtopRules <- singletonsrules[1:30]
+plot(singletonSSDtopRules, method="graph")
+# Singletons WGD regcode
+x<-which(regcode$gene %in% singletonsINwgdClust & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+singletonsrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+singletonsrules <- sort(singletonsrules, by='confidence', decreasing = TRUE)
+summary(singletonsrules)
+singletonWGDtopRules <- singletonsrules[1:30]
+plot(singletonWGDtopRules, method="graph")
+# SSD in SSD
+x<-which(regcode$gene %in% ssdgenesINssdClust & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+ssdSSDrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+ssdSSDrules <- sort(ssdSSDrules, by='confidence', decreasing = TRUE)
+summary(ssdSSDrules)
+ssdSSDtopRules <- ssdSSDrules[1:30]
+plot(ssdSSDtopRules, method="graph")
+# SSD in WGD
+x<-which(regcode$gene %in% ssdgenesINwgdClust & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+ssdWGDrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+ssdWGDrules <- sort(ssdWGDrules, by='confidence', decreasing = TRUE)
+summary(ssdWGDrules)
+ssdWGDtopRules <- ssdWGDrules[1:30]
+plot(ssdWGDtopRules, method="graph")
+# WGD in WGD
+x<-which(regcode$gene %in% wgdgenesINwgdClust & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+wgdWGDrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+wgdWGDrules <- sort(wgdWGDrules, by='confidence', decreasing = TRUE)
+summary(wgdWGDrules)
+wgdWGDtopRules <- wgdWGDrules[1:30]
+plot(wgdWGDtopRules, method="graph")
+# WGD in SSD
+x<-which(regcode$gene %in% wgdgenesINssdClust & regcode$TFs!=".")
+write.csv(regcode$TFs[x], file="~/Dropbox/Data/Yeast_RegCode/temp", quote = FALSE, row.names = FALSE)
+combinations<-read.transactions("~/Dropbox/Data/Yeast_RegCode/temp", format="basket", sep=",")
+wgdSSDrules <- apriori(combinations, parameter = list(supp=0.001, conf=0.8, minlen=2, maxlen=5))
+wgdSSDrules <- sort(wgdSSDrules, by='confidence', decreasing = TRUE)
+summary(wgdSSDrules)
+wgdSSDtopRules <- wgdSSDrules[1:30]
+plot(wgdSSDtopRules, method="graph")
+
+```
+
+### Comparisons of STRING PPI 
+
+```{r}
+jaccard<-function(x, y){
+  jac<-length(intersect(x,y))/length(union(x,y))
+  return(jac)
+}
+#
+ssdppijaccard<-0
+x<-which(fdata$geneType=="SSD")
+fdata2<-fdata[x,]
+for (i in 1:length(fdata2$geneType)){
+  idrowA<-which(as.character(scerSTRINGPPI$protein1)==as.character(fdata2$geneNameA[i]))
+  idrowB<-which(as.character(scerSTRINGPPI$protein1)==as.character(fdata2$geneNameB[i]))
+  if(length(idrowA)>0 & length(idrowB)>0){
+    jac<-jaccard(scerSTRINGPPI$protein2[idrowA], scerSTRINGPPI$protein2[idrowB])
+    ssdppijaccard[i]<-jac
+    }
+  else{
+    ssdppijaccard[i]<-0
+  }
+}
+#
+wgdppijaccard<-0
+x<-which(fdata$geneType=="WGD")
+fdata2<-fdata[x,]
+for (i in 1:length(fdata2$geneType)){
+  idrowA<-which(as.character(scerSTRINGPPI$protein1)==as.character(fdata2$geneNameA[i]))
+  idrowB<-which(as.character(scerSTRINGPPI$protein1)==as.character(fdata2$geneNameB[i]))
+  if(length(idrowA)>0 & length(idrowB)>0){
+    jac<-jaccard(scerSTRINGPPI$protein2[idrowA], scerSTRINGPPI$protein2[idrowB])
+    wgdppijaccard[i]<-jac
+    }
+  else{
+    wgdppijaccard[i]<-0
+  }
+}
+# Singletons (Random)
+singletonppijaccard<-0
+for (i in 1:500){
+  gene1<-sample(singletongenes, 1)
+  gene2<-sample(singletongenes, 1)
+  idrowA<-which(as.character(scerSTRINGPPI$protein1)==gene1)
+  idrowB<-which(as.character(scerSTRINGPPI$protein1)==gene2)
+  if(length(idrowA)>0 & length(idrowB)>0){
+    jac<-jaccard(scerSTRINGPPI$protein2[idrowA], scerSTRINGPPI$protein2[idrowB])
+    singletonppijaccard[i]<-jac
+    }
+  else{
+    singletonppijaccard[i]<-0
+  }
+}
+# Singletons in SSD (Random)
+singletonSSDppijaccard<-0
+for (i in 1:500){
+  gene1<-sample(singletonsINssdClust, 1)
+  gene2<-sample(singletonsINssdClust, 1)
+  idrowA<-which(as.character(scerSTRINGPPI$protein1)==gene1)
+  idrowB<-which(as.character(scerSTRINGPPI$protein1)==gene2)
+  if(length(idrowA)>0 & length(idrowB)>0){
+    jac<-jaccard(scerSTRINGPPI$protein2[idrowA], scerSTRINGPPI$protein2[idrowB])
+    singletonSSDppijaccard[i]<-jac
+    }
+  else{
+    singletonSSDppijaccard[i]<-0
+  }
+}
+#
+# Singletons in WGD (Random)
+singletonWGDppijaccard<-0
+for (i in 1:500){
+  gene1<-sample(singletonsINwgdClust, 1)
+  gene2<-sample(singletonsINwgdClust, 1)
+  idrowA<-which(as.character(scerSTRINGPPI$protein1)==gene1)
+  idrowB<-which(as.character(scerSTRINGPPI$protein1)==gene2)
+  if(length(idrowA)>0 & length(idrowB)>0){
+    jac<-jaccard(scerSTRINGPPI$protein2[idrowA], scerSTRINGPPI$protein2[idrowB])
+    singletonWGDppijaccard[i]<-jac
+    }
+  else{
+    singletonWGDppijaccard[i]<-0
+  }
+}
+#
+# Singletons in Complement (Random)
+singletonCompppijaccard<-0
+for (i in 1:500){
+  gene1<-sample(singletonsINcomplementClust, 1)
+  gene2<-sample(singletonsINcomplementClust, 1)
+  idrowA<-which(as.character(scerSTRINGPPI$protein1)==gene1)
+  idrowB<-which(as.character(scerSTRINGPPI$protein1)==gene2)
+  if(length(idrowA)>0 & length(idrowB)>0){
+    jac<-jaccard(scerSTRINGPPI$protein2[idrowA], scerSTRINGPPI$protein2[idrowB])
+    singletonCompppijaccard[i]<-jac
+    }
+  else{
+    singletonCompppijaccard[i]<-0
+  }
+}
+#
+boxplot(singletonSSDppijaccard, singletonWGDppijaccard, singletonCompppijaccard)
+#pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/Supplementary_PPISimilarity_GeneType_boxplot.pdf", height=10, width=8)
+boxplot(ssdppijaccard, wgdppijaccard, singletonppijaccard, outline=F, col=c("olivedrab", "firebrick4", "steelblue4"), lwd=3, las=1, xlab="Gene Type", names=c("SSD", "WGD", "Singletons(Random)"), ylab="Common Protein-Protein Interactions", main="Similarity of PPI partners", cex.lab=1.3, cex.axis=1.3, cex.main=1.6)
+#dev.off()
+```
+
+### Comparison of Pfam structure in duplicate pairs
+```{r}
+scores<-0
+types<-""
+cltypes<-""
+colnames(fdata)[20]<-"geneType"
+for(i in 1:length(fdata[,1])){
+  x<-pfamAll$HMMName[grep(as.character(fdata$geneNameA[i]), pfamAll$Gene)]
+  y<-pfamAll$HMMName[grep(as.character(fdata$geneNameB[i]), pfamAll$Gene)]
+  scores<-c(scores, length(intersect(x,y))/length(union(x,y)))
+  types<-c(types, as.character(fdata$geneType[i]))
+  cltypes<-c(cltypes, as.character(fdata$Cluster[i]))
+  #print(length(intersect(x,y))/length(union(x,y)), as.character(fdata$geneType[i]), as.character(fdata$Cluster[i]))
+}
+pfamSimScores<-data.frame("PfamSimScore"=scores[2:length(scores)], "geneType"=types[2:length(types)], "geneClusterType"=cltypes[2:length(cltypes)])
+#
+my_comparisons1 <- list(c("SSD", "WGD"))
+#
+my_comparisons2 <- list(c("SSDCombination", "SSDinSSD"), c("SSDinSSD", "SSDinWGD"), c("SSDCombination", "SSDinWGD"), c("WGDCombination", "WGDinWGD"), c("WGDinWGD", "WGDinSSD"), c("WGDCombination", "WGDinSSD"), c("WGDinWGD", "SSDinSSD"))
+my_comparisons3 <- list(c("SSDCombination", "WGDCombination"), c("WGDinWGD", "SSDinSSD"), c("WGDinSSD", "SSDinWGD"))
+
+bplot<-ggboxplot(pfamSimScores, x = "geneClusterType", y = "PfamSimScore", fill = "geneType", title="Pfam Similarity", palette = c("firebrick4",  "olivedrab")) + stat_compare_means(comparisons = my_comparisons2) #+ coord_flip() #+ stat_compare_means(label.y = max(1))
+bplot
+
+
+```
+### Enrichments in Pfam Domains 
+We obtained all pfam domains with more than 10 instances and calculated their enrichments in Gene Cluster Types against a background for the complete yeast genome
+```{r}
+table(pfamAll$HMMName)[which(table(pfamAll$HMMName)>=10)]->pfamBG
+pfamAll[x,]->pfamSel
+factor(pfamSel$HMMName)->pfamSel$HMMName
+table(pfamSel$HMMName)->pfamBG
+table(pfamSel$HMMName[which(pfamAll$geneClusterType=="SSD_in_SSDCluster")])->pfamSSDinSSD
+table(pfamSel$HMMName[which(pfamAll$geneClusterType=="WGD_in_WGDCluster")])->pfamWGDinWGD
+table(pfamSel$HMMName[which(pfamAll$geneClusterType=="WGD_in_SSDCluster")])->pfamWGDinSSD
+table(pfamSel$HMMName[which(pfamAll$geneClusterType=="SSD_in_WGDCluster")])->pfamSSDinWGD
+table(pfamSel$HMMName[which(pfamAll$geneClusterType=="Singletons_in_SSDCluster")])->pfamSingletonsinSSD
+table(pfamSel$HMMName[which(pfamAll$geneClusterType=="Singletons_in_WGDCluster")])->pfamSingletonsinWGD
+table(pfamSel$HMMName[which(pfamAll$geneClusterType=="Singletons_in_ComplementCluster")])->pfamSingletonsinComplement
+#
+# Ratios
+pfamBG<-pfamBG/length(pfamSel$HMMName)
+pfamSSDinSSD<-pfamSSDinSSD/length(pfamSel$HMMName[which(pfamSel$geneClusterType=="SSD_in_SSDCluster")])
+pfamWGDinWGD<-pfamWGDinWGD/length(pfamSel$HMMName[which(pfamSel$geneClusterType=="WGD_in_WGDCluster")])
+pfamSSDinWGD<-pfamSSDinSSD/length(pfamSel$HMMName[which(pfamSel$geneClusterType=="SSD_in_WGDCluster")])
+pfamWGDinSSD<-pfamWGDinWGD/length(pfamSel$HMMName[which(pfamSel$geneClusterType=="WGD_in_SSDCluster")])
+pfamSingletonsinComplement<-pfamSingletonsinComplement/length(pfamSel$HMMName[which(pfamSel$geneClusterType=="Singletons_in_ComplementCluster")])
+pfamSingletonsinSSD<-pfamSingletonsinSSD/length(pfamSel$HMMName[which(pfamSel$geneClusterType=="Singletons_in_SSDCluster")])
+pfamSingletonsinWGD<-pfamSingletonsinWGD/length(pfamSel$HMMName[which(pfamSel$geneClusterType=="Singletons_in_WGDCluster")])
+#
+pfamSelEnrichments<-data.frame("SSDinSSD"=(pfamSSDinSSD/pfamBG), "WGDinWGD"=pfamWGDinWGD/pfamBG, "SSDinWGD"=pfamSSDinWGD/pfamBG, "WGDinSSD"=pfamWGDinSSD/pfamBG, "SingletonsinComplement"=pfamSingletonsinComplement/pfamBG, "SingletonsinSSD"=pfamSingletonsinSSD/pfamBG, "SingletonsinWGD"=pfamSingletonsinWGD/pfamBG)
+write.table(file="~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Pfam_Enrichments.tsv", pfamSelEnrichments[,c(1,2,4,6,8,10,12,14)], quote=F, row.names = F, sep="\t")
+```
+
+
+### Semantic similarity with GO
+```{r}
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/Supplementary_WGD_SSD_GOSemanticSimilarity.pdf", height=5, width=4)
+beanplot(rowMeans(ssdGOsim[,2:4], na.rm=T), rowMeans(wgdGOsim[,2:4], na.rm=T), what=c(1,1,1,0), col=c("firebrick4", "olivedrab"), las=1, names=c("SSD", "WGD"), main="Semantic Similarity (GO Terms)", cex.names=1.5, cex.lab=1.6, cex.main=1.3)
+text(2, 0, "p=5.5e-10")
+dev.off()
+t.test(rowMeans(ssdGOsim[,2:4], na.rm=T), rowMeans(wgdGOsim[,2:4], na.rm=T))
+```
+
+
+### Genetic Interactions (Constanzo Data)
+Correlation of Genetic Interaction Scores. Getting values for SSD/WGD and then separately for a random choice of singletons
+```{r}
+# SSD
+ssdgenintCC<-0
+x<-which(fdata$geneType=="SSD")
+fdata2<-fdata[x,]
+for (i in 1:length(fdata2$geneType)){
+  idrow<-which(as.character(rowGenes)==as.character(fdata2$geneNameA[i]))
+  idcol<-which(as.character(colGenes)==as.character(fdata2$geneNameB[i]))
+  if (length(idrow)!=0 & length(idcol)!=0){
+    ssdgenintCC[i]<-as.numeric(as.character(datamat[idrow, idcol][[1]]))
+  }
+  else{
+    ssdgenintCC[i]<-0
+  }
+}
+# WGD
+# SSD
+wgdgenintCC<-0
+x<-which(fdata$geneType=="WGD")
+fdata2<-fdata[x,]
+for (i in 1:length(fdata2$geneType)){
+  idrow<-which(as.character(rowGenes)==as.character(fdata2$geneNameA[i]))
+  idcol<-which(as.character(colGenes)==as.character(fdata2$geneNameB[i]))
+  if (length(idrow)!=0 & length(idcol)!=0){
+    wgdgenintCC[i]<-as.numeric(as.character(datamat[idrow, idcol][[1]]))
+  }
+  else{
+    wgdgenintCC[i]<-0
+  }
+}
+# Random Singletons
+singletongenintCC<-0
+for (i in 1:500){
+  gene1<-sample(singletongenes, 1)
+  gene2<-sample(singletongenes, 1)
+  idrow<-which(as.character(rowGenes)==gene1)
+  idcol<-which(as.character(colGenes)==gene2)
+  if (length(idrow)!=0 & length(idcol)!=0){
+    singletongenintCC[i]<-as.numeric(as.character(datamat[idrow, idcol][[1]]))
+  }
+  else{
+    singletongenintCC[i]<-0
+  }
+}
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/Supplementary_GenIntCorrelations_GeneType_boxplot.pdf", height=10, width=8)
+boxplot(ssdgenintCC, wgdgenintCC, singletongenintCC, outline=F, col=c("olivedrab", "firebrick4", "steelblue4"), lwd=3, las=1, xlab="Gene Type", names=c("SSD", "WGD", "Singletons(Random)"), ylab="Genetic Interaction Score Correlation", main="Similarity of Genetic Interaction Profiles", cex.lab=1.3, cex.axis=1.3, cex.main=1.6)
+dev.off()
+```
+### Genetic Interactions
+
+Measuring mean Genetic Interaction, mean Absolute Genetic Interactions and Proportions of pos/neg interactions
+```{r}
+# Singletons in Complement
+gene_list<-singletonsINcomplementClust
+ginterscores<-0
+absginterscores<-0
+posginterscores<-0
+neginterscores<-0
+for(i in 1:length(gene_list)){
+  j<-which(genInter$QueryORF==gene_list[i] | genInter$ArrayORF==gene_list[i])
+  x<-mean(genInter$GeneticInteractionScore[j])
+  y<-mean(abs(genInter$GeneticInteractionScore[j]))
+  w<-length(which(genInter$GeneticInteractionScore[j]>0))/length(genInter$GeneticInteractionScore[j])
+  z<-length(which(genInter$GeneticInteractionScore[j]<=0))/length(genInter$GeneticInteractionScore[j])
+  ginterscores<-c(ginterscores, x)
+  absginterscores<-c(absginterscores, y)
+  posginterscores<-c(posginterscores, w)
+  neginterscores<-c(neginterscores, z)
+}
+ginterscores->singCompGenIntScores
+absginterscores->singCompAbsGenIntScores
+neginterscores->singCompNegGenIntScores
+posginterscores->singCompPosGenIntScores
+# singletons in SSD Cluster
+gene_list<-singletonsINssdClust
+ginterscores<-0
+absginterscores<-0
+posginterscores<-0
+neginterscores<-0
+for(i in 1:length(gene_list)){
+  j<-which(genInter$QueryORF==gene_list[i] | genInter$ArrayORF==gene_list[i])
+  x<-mean(genInter$GeneticInteractionScore[j])
+  y<-mean(abs(genInter$GeneticInteractionScore[j]))
+  w<-length(which(genInter$GeneticInteractionScore[j]>0))/length(genInter$GeneticInteractionScore[j])
+  z<-length(which(genInter$GeneticInteractionScore[j]<=0))/length(genInter$GeneticInteractionScore[j])
+  ginterscores<-c(ginterscores, x)
+  absginterscores<-c(absginterscores, y)
+  posginterscores<-c(posginterscores, w)
+  neginterscores<-c(neginterscores, z)
+}
+ginterscores->singSSDGenIntScores
+absginterscores->singSSDAbsGenIntScores
+neginterscores->singSSDNegGenIntScores
+posginterscores->singSSDPosGenIntScores
+# Singletons in WGD
+gene_list<-singletonsINwgdClust
+ginterscores<-0
+absginterscores<-0
+posginterscores<-0
+neginterscores<-0
+for(i in 1:length(gene_list)){
+  j<-which(genInter$QueryORF==gene_list[i] | genInter$ArrayORF==gene_list[i])
+  x<-mean(genInter$GeneticInteractionScore[j])
+  y<-mean(abs(genInter$GeneticInteractionScore[j]))
+  w<-length(which(genInter$GeneticInteractionScore[j]>0))/length(genInter$GeneticInteractionScore[j])
+  z<-length(which(genInter$GeneticInteractionScore[j]<=0))/length(genInter$GeneticInteractionScore[j])
+  ginterscores<-c(ginterscores, x)
+  absginterscores<-c(absginterscores, y)
+  posginterscores<-c(posginterscores, w)
+  neginterscores<-c(neginterscores, z)
+}
+ginterscores->singWGDGenIntScores
+absginterscores->singWGDAbsGenIntScores
+neginterscores->singWGDNegGenIntScores
+posginterscores->singWGDPosGenIntScores
+# SSD in SSD
+gene_list<-ssdgenesINssdClust
+ginterscores<-0
+absginterscores<-0
+posginterscores<-0
+neginterscores<-0
+for(i in 1:length(gene_list)){
+  j<-which(genInter$QueryORF==gene_list[i] | genInter$ArrayORF==gene_list[i])
+  x<-mean(genInter$GeneticInteractionScore[j])
+  y<-mean(abs(genInter$GeneticInteractionScore[j]))
+  w<-length(which(genInter$GeneticInteractionScore[j]>0))/length(genInter$GeneticInteractionScore[j])
+  z<-length(which(genInter$GeneticInteractionScore[j]<=0))/length(genInter$GeneticInteractionScore[j])
+  ginterscores<-c(ginterscores, x)
+  absginterscores<-c(absginterscores, y)
+  posginterscores<-c(posginterscores, w)
+  neginterscores<-c(neginterscores, z)
+}
+ginterscores->ssdSSDGenIntScores
+absginterscores->ssdSSDAbsGenIntScores
+neginterscores->ssdSSDNegGenIntScores
+posginterscores->ssdSSDPosGenIntScores
+# SSD in WGD
+gene_list<-ssdgenesINwgdClust
+ginterscores<-0
+absginterscores<-0
+posginterscores<-0
+neginterscores<-0
+for(i in 1:length(gene_list)){
+  j<-which(genInter$QueryORF==gene_list[i] | genInter$ArrayORF==gene_list[i])
+  x<-mean(genInter$GeneticInteractionScore[j])
+  y<-mean(abs(genInter$GeneticInteractionScore[j]))
+  w<-length(which(genInter$GeneticInteractionScore[j]>0))/length(genInter$GeneticInteractionScore[j])
+  z<-length(which(genInter$GeneticInteractionScore[j]<=0))/length(genInter$GeneticInteractionScore[j])
+  ginterscores<-c(ginterscores, x)
+  absginterscores<-c(absginterscores, y)
+  posginterscores<-c(posginterscores, w)
+  neginterscores<-c(neginterscores, z)
+}
+ginterscores->ssdWGDGenIntScores
+absginterscores->ssdWGDAbsGenIntScores
+neginterscores->ssdWGDNegGenIntScores
+posginterscores->ssdWGDPosGenIntScores
+# WGD in SSD
+gene_list<-wgdgenesINssdClust
+ginterscores<-0
+absginterscores<-0
+posginterscores<-0
+neginterscores<-0
+for(i in 1:length(gene_list)){
+  j<-which(genInter$QueryORF==gene_list[i] | genInter$ArrayORF==gene_list[i])
+  x<-mean(genInter$GeneticInteractionScore[j])
+  y<-mean(abs(genInter$GeneticInteractionScore[j]))
+  w<-length(which(genInter$GeneticInteractionScore[j]>0))/length(genInter$GeneticInteractionScore[j])
+  z<-length(which(genInter$GeneticInteractionScore[j]<=0))/length(genInter$GeneticInteractionScore[j])
+  ginterscores<-c(ginterscores, x)
+  absginterscores<-c(absginterscores, y)
+  posginterscores<-c(posginterscores, w)
+  neginterscores<-c(neginterscores, z)
+}
+ginterscores->wgdSSDGenIntScores
+absginterscores->wgdSSDAbsGenIntScores
+neginterscores->wgdSSDNegGenIntScores
+posginterscores->wgdSSDPosGenIntScores
+# WGD in WGD
+gene_list<-wgdgenesINwgdClust
+ginterscores<-0
+absginterscores<-0
+posginterscores<-0
+neginterscores<-0
+for(i in 1:length(gene_list)){
+  j<-which(genInter$QueryORF==gene_list[i] | genInter$ArrayORF==gene_list[i])
+  x<-mean(genInter$GeneticInteractionScore[j])
+  y<-mean(abs(genInter$GeneticInteractionScore[j]))
+  w<-length(which(genInter$GeneticInteractionScore[j]>0))/length(genInter$GeneticInteractionScore[j])
+  z<-length(which(genInter$GeneticInteractionScore[j]<=0))/length(genInter$GeneticInteractionScore[j])
+  ginterscores<-c(ginterscores, x)
+  absginterscores<-c(absginterscores, y)
+  posginterscores<-c(posginterscores, w)
+  neginterscores<-c(neginterscores, z)
+}
+ginterscores->wgdWGDGenIntScores
+absginterscores->wgdWGDAbsGenIntScores
+neginterscores->wgdWGDNegGenIntScores
+posginterscores->wgdWGDPosGenIntScores
+#
+```
+
+
+
+
+## Figures
+
+### What we know #1
+
+* Yeast has undergone at least one such genome-wide event, which was followed by a massive purge of duplicate/redundant genes.
+* There are two types of gene duplicates in yeast. Genes originating from whole-genome duplication (WGD, Ohnologs) and genes originating from small-scale duplication (SSD, paralogs).
+* According to published works there are 545 Ohnolog and 509 paralog pairs in the yeast genome. Thus ~1/3 of the yeast genes are products of gene duplication. 
+
+
+### What we know #2
+
+* There are differences in the divergence rates with SSD (paralogs) being more diverged and accumulating more SNPs than Ohnologs.
+* SSDs have greater expression variability
+* Paralogs are more enriched in essential genes. 
+* Paralogs have more protein interactions but Ohnologs are over-represented in protein complexes
+* Overall, genes that have been part of a whole-genome duplication and genes that are the result of small-scale duplications show **distinct functional, regulatory and evolutionary properties** 
+
+### Goals
+
+* To investigate the parameters that can explain the three alternative fates (erosion, sub- and neo-functionalization)
+* Most of the anayses in this respect treat the two daughter genes as linked or entangled from their birth through an “invisible thread” regardless of their genomic context. 
+* We want to investigate the degree to which the "genomic context", i.e. the genomic environment, in which a gene is embedded may shape the fate of the duplicate gene pair.
+
+### The biological question(s)
+
+* To what extent is the evolutionary and/or functional divergence of the duplicate gene pair dependent on:
+  1. The position of the duplicate pair (or one of the pair's genes) on the linear chromosomes (spatial constraints)
+  2. The properties of genes in their immediate proximity (gene "socialization")
+  3. The underlying DNA compositional, structural and chromatin characteristics (structural environment)
+
+### Results Spatial Constraints 
+
+### Figure 1
+```{r}
+source("~/Dropbox/Programs/R_functions/yeastgenomeplot.R")
+ssdwgdclusters<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/SGD_WGD_ClusterCoordinates_for_Domainogram.bg", header=F, sep="\t")
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure1A_Domainogram.pdf", height=5, width=7);yeast.genome.plot(chromosomes, ssdwgdclusters, "Duplicate Gene Clusters", "olivedrab", "firebrick4"); legend("bottomright", c("SSD", "WGD"), fill=c("firebrick4", "olivedrab"), bty="n", cex=1.5);dev.off()
+#
+wgdssdreldist<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/WGD_SSD_reldist.tsv", header=T, sep="\t")
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure1B_RelDistPlot.pdf", height=5, width=7);par(mar=c(5,5,5,3));plot(wgdssdreldist$reldist, filter(wgdssdreldist$fraction, rep(1/10,10)), type="o", pch=19, lwd=3, col="grey15", las=1, xlab="Relative SSD/WGD Cluster Distance", ylab="", main="Fraction of Relative Distances", cex.main=2, cex.lab=1.5, cex.axis=1.3);abline(h=0.02, lty=3, lwd=3, col="grey15");dev.off()
+#
+my_comparisons <- list(c("SSD", "WGD"))
+completedata$logdist<-log10(completedata$dist)
+bplot<-ggboxplot(completedata, x = "Type", y = "logdist", fill="Type", title="Distance on same chromosome", palette = c("firebrick4",  "olivedrab"))+ stat_compare_means() + labs(x="Duplicate Gene Type", y="log10(distance)")
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure1D_DistChromb.pdf", height=5, width=3.5)
+bplot
+dev.off()
+```
+### Figure 1C (Same Different Chromosomes)
+```{r}
+#result is given by
+table(fdata$Chrom_Dist, fdata$Type)
+df2<-data.frame("GeneType"=c(rep("SSD",2), rep("WGD",2)), "Chromosome"=rep(c("Same", "Different"),2), "Number of Pairs"=c(88,428,27,518))
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure1C_SameDiffChromBarchart.pdf", height=4.0, width=3.5)
+ggplot(data=df2, aes(x=GeneType, y=Number.of.Pairs, fill=Chromosome)) +
+geom_bar(stat="identity") + scale_fill_manual(values = c("cornflowerblue","darkorange4")) + labs(title = "Duplicate Pairs in Chromosomes", x="Duplicate Gene Type", y = "Number of Pairs") + geom_text(label="chi-square p = 4.4e-10", x = 1.5, y = 560, size = 3)
+dev.off()
+```
+
+### Figure 2A 1-D coordinates
+```{r}
+comps=list(c("SSD_in_SSDCluster", "SSD_in_WGDCluster"), c("Singletons_in_SSDCluster", "Singletons_in_WGDCluster"), c("Singletons_in_SSDCluster", "Singletons_in_ComplementCluster"))
+
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure2A_TelDistBoxPlot_test.pdf", height=4, width=6.5);plotggplot(nucPosClust, "distTel", "geneClusterType", "Scaled Distance from Chromosomal Edge", labs=c("Distance from chromosomal edge", "Gene Cluster Type", "Scaled Distance"), comps=comps);dev.off()
+#
+comps=list( c("SSD_in_SSDCluster", "SSD_in_WGDCluster"), c("Singletons_in_SSDCluster", "Singletons_in_WGDCluster"), c("Singletons_in_ComplementCluster", "Singletons_in_WGDCluster"))
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure2B_Coords3DboxPlot.pdf.pdf", height=4, width=6.5);plotggplot(coords3d, "polar", "geneClusterType", "", labs=c("3D Distance from Genome Center", "Gene Cluster Type", "Scaled Polar Distance"), comps=comps);dev.off()
+#
+```
+
+### Figure 2B - 3D coordinates
+```{r}
+library(wesanderson)
+library(RColorBrewer)
+hcols<-colorRampPalette(c("steelblue3", "steelblue1", "gold", "goldenrod2" , "red"))(256)
+#
+coord3EnrTable<-t(tab/(rbind(table(coords3d$geneClusterType), table(coords3d$geneClusterType), table(coords3d$geneClusterType))*c(0.25, 0.50, 0.25)))
+#
+rev(c(coord3EnrTable[3,]))->coord3EnrTable[3,]
+coord3EnrTable[4,1]->x
+coord3EnrTable[4,2]->y
+y->coord3EnrTable[4,1]
+x->coord3EnrTable[4,2]
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure2B2_Coords3DHeatmap.pdf", height=6, width=3.5)
+heatmap.2(coord3EnrTable, mar=c(10,20), Colv=NA, cexCol=1.6, cexRow=1, trace="none", cellnote = round(coord3EnrTable, digits=2), notecol = "black", col=hcols, scale="row", key = F)
+dev.off()
+```
+
+### Figure 3 Gene Length and Coding Density
+```{r}
+my_comparisons1 <- list(c ("SSD", "WGD"), c("SSD", "singletons"), c("WGD", "singletons"))
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure3A_GeneSizeBoxplot.pdf", height=5, width=3.6)
+bplot<-ggboxplot(spacers, x = "geneType", y = "logLength", fill = "geneType", title="Gene Length (log10)", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons1)
+bplot
+dev.off();
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/SupplementaryFigure_GeneSizeBoxplotClusters.pdf", height=5, width=9)
+bplot<-ggboxplot(spacers, x = "geneClusterType", y = "logLength", fill = "geneType", title="Gene Length (log10)", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons2) + coord_flip()
+bplot
+dev.off();
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/SupplementaryFigure_SpacerSizeBoxplot.pdf", height=7, width=5)
+bplot<-ggboxplot(spacers, x = "geneType", y = "logSpacer", fill = "geneType", title="Mean size of up/downstream gene spacer (log10)", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons1)
+bplot
+dev.off();
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure3Β_CodDensBoxplot.pdf", height=4, width=6.1)
+comps=list(c("WGD_in_SSDCluster", "WGD_in_WGDCluster"), c("Singletons_in_SSDCluster", "Singletons_in_ComplementCluster"))
+plotggplot(coddens, "codingDensity", "geneClusterType", "", labs=c("Coding Density", "Gene Cluster Type", "Percentage of Coding Sequence in Cluster"), comps=comps)
+dev.off();
+```
+
+### Figure 4A,B,C - Mean Gene Conservation, Patterns, and Promoters
+```{r}
+my_comparisons1 <- list(c ("SSD", "WGD"), c("SSD", "singletons"), c("WGD", "singletons"))
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure4A_PhConsBoxplot.pdf", height=5, width=3.6)
+bplot<-ggboxplot(nucPosClust, x = "geneType", y = "phCons", fill = "geneType", title="Average Gene Conservation", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons1)
+bplot
+dev.off()
+# phyloCSF
+my_comparisons1 <- list(c ("SSD", "WGD"), c("SSD", "singletons"), c("WGD", "singletons"))
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure4A_phyloCSFBoxplot.pdf", height=5, width=3.85)
+bplot<-ggboxplot(meanphyloCSF, x = "geneType", y = "phyloCSF", fill = "geneType", title="Average Gene Conservation", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons1)
+bplot
+dev.off()
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/SupplementaryFigure_PhConsBoxplotClusterType.pdf", height=5, width=10)
+bplot<-ggboxplot(nucPosClust, x = "geneClusterType", y = "phCons", fill = "geneType", title="Average Gene Conservation Score", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons2) + coord_flip()
+bplot
+dev.off()
+# PhyloCSF
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/SupplementaryFigure_phyloCSFBoxplotClusterType.pdf", height=5, width=10)
+bplot<-ggboxplot(meanphyloCSF, x = "geneClusterType", y = "phyloCSF", fill = "geneType", title="Average Gene Conservation Score", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons2) + coord_flip()
+bplot
+dev.off()
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/SupplementaryFigure_phyloCSFBoxplotClusterType.pdf", height=5, width=10)
+bplot<-ggboxplot(meanphyloCSF, x = "geneClusterType", y = "phyloCSF", fill = "geneType", title="Average Gene Conservation Score", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons2) + coord_flip()
+bplot
+dev.off()
+
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure4B_ConservationTSS.pdf", height=6, width=8)
+par(mar=c(5,6,6,2))
+plot(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneType=="singletons"),4:103], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS",  main="Sequence Conservation around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(0.2, 0.8))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneType=="SSD"),4:103], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(seqconsTSS[which(seqconsTSS$geneType=="WGD"),4:103], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+dev.off()
+# phyloCSF
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure4B_PhyloCSFTSS.pdf", height=6, width=8)
+par(mar=c(5,6,6,2))
+plot(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneType=="singletons"),6:104], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="phyloCSF Score", xlab="distance from TSS",  main="Sequence Conservation around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(0.55, 0.90))
+lines(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneType=="SSD"),6:104], na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-490, 495, 10), colMeans(phyloCSF[which(phyloCSF$geneType=="WGD"),6:104], na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="phastCons Score", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+dev.off()
+#
+comps=list(c("WGD_in_SSDCluster", "WGD_in_WGDCluster"),  c("Singletons_in_ComplementCluster", "Singletons_in_SSDCluster"), c("Singletons_in_ComplementCluster", "Singletons_in_WGDCluster"))
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure4C_PhConsPromoterBoxplot.pdf", height=5, width=10)
+plotggplot(seqconsTSS, "MeanPromCons", "geneClusterType", "", labs=c("Average Promoter Conservation", "Gene Cluster Type", "mean phCons at -150,0 from TSS"), comps=comps)
+dev.off()
+# Number of TFs
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure4D_TFnumberBoxplot.pdf", height=5, width=4);ggboxplot(regcode, x = "geneType", y = "TFNo", fill = "geneType", title="Number of different TFBS in Promoter", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons1);dev.off()
+```
+
+### Figure 5A,B,C - Nucleosomes and Structural Conservation
+```{r}
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure5A_NucPosTSS.pdf", height=6, width=8)
+par(mar=c(5,6,6,2))
+plot(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneType=="singletons"),18:117]), type="l", col="steelblue4", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95), main="Nucleosome Occupancy around TSS", cex.main=2, cex.lab=1.5, cex.axis=1.3)
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneType=="SSD"),18:117]), type="l", col="firebrick4", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+lines(seq(-495, 495, 10), colMeans(nucPosClust[which(nucPosClust$geneType=="WGD"),18:117]), type="l", col="olivedrab", lwd=5, las=1, ylab="Nucleosome Occupancy", xlab="distance from TSS", ylim=c(0.55, 0.95))
+legend("bottomright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+dev.off()
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure5B1_MeanNucOccPromoterBoxplot.pdf", height=5, width=4)
+my_comparisons <- list(c("SSD", "singletons"), c("WGD", "singletons"))
+bplot<-ggboxplot(nucPosClust, x = "geneType", y = "MeanNucOcc", fill = "geneType", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons) + labs(title="Promoter Nucleosome Occupancy", x="Gene Type", y="Mean Nucleosome Score in (-200,TSS)")
+bplot
+dev.off()
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure5B2_trNoiseBoxplot.pdf", height=5, width=4)
+my_comparisons <- list(c("SSD", "singletons"), c("WGD", "singletons"))
+bplot<-ggboxplot(nucPosClust, x = "geneType", y = "trNoise", fill = "geneType", palette = c("firebrick4",  "olivedrab", "steelblue4")) + stat_compare_means(comparisons = my_comparisons) + labs(title="Expression Variability", x="Gene Type", y="Expression level variance")
+bplot
+dev.off()
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure5C_StructuralRobustnessTSS.pdf", height=6, width=8)
+par(mar=c(5,6,6,2))
+plot(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneType=="singletons"),4:103], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS",  main="Chromatin Structure Constraint", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(-0.2, 1))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneType=="SSD"),4:103],  na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneType=="WGD"),4:103],  na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+legend("topright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+dev.off()
+
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure5D_StructuralRobustnessSingletonsTSS.pdf", height=6, width=8)
+par(mar=c(5,6,6,2))
+plot(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="Singletons_in_ComplementCluster"),4:103], na.rm=T), type="l", col="steelblue4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS",  main="Singletons: Chromatin Structure Constraint", cex.main=1.8, cex.lab=1.5, cex.axis=1.3, ylim=c(-0.2, 1))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="Singletons_in_SSDCluster"),4:103],  na.rm=T), type="l", col="firebrick4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+lines(seq(-495, 495, 10), colMeans(mutasomeTSS[which(mutasomeTSS$geneClusterType=="Singletons_in_WGDCluster"),4:103],  na.rm=T), type="l", col="olivedrab", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+legend("topright", c("Complement", "SSD Clusters", "WGD Clusters"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+dev.off()
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure5C_SymCurvRobustnessTSS.pdf", height=6, width=8)
+par(mar=c(5,6,6,2))
+plot(seq(-495, 495, 10), (-log10(colMeans(strconsTSS[which(strconsTSS$geneType=="singletons"),4:103], na.rm=T))), type="l", col="steelblue4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS",  main="Chromatin Structure Constraint", cex.main=2, cex.lab=1.5, cex.axis=1.3, ylim=c(2.83,3))
+lines(seq(-495, 495, 10), (-log10(colMeans(strconsTSS[which(strconsTSS$geneType=="SSD"),4:103], na.rm=T))), type="l", col="firebrick4", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+lines(seq(-495, 495, 10), (-log10(colMeans(strconsTSS[which(strconsTSS$geneType=="WGD"),4:103], na.rm=T))), type="l", col="olivedrab", lwd=5, las=1, ylab="Constraint score", xlab="distance from TSS", ylim=c(0, 0.95))
+legend("topright", c("Singletons", "SSD", "WGD"), fill=c("steelblue4", "firebrick4", "olivedrab"), bty="n", cex=1.5)
+dev.off()
+```
+
+
+## Figure 6, Correlations between nucOcc, nucCons, pfamDensity
+
+```{r}
+colnames(nucPosClust)[which(colnames(nucPosClust)=="gene")]<-"Gene"
+merge(nucPosClust, seqconsTSS, by="Gene", all=F)->df
+df$MeanNucOcc[which(df$MeanNucOcc>1)]<-1
+ggplot(df, aes(x = MeanPromCons, y = MeanNucOcc)) + geom_density_2d_filled() 
+#
+merge(pfamDom, nucPosClust, by="Gene", all=F)->df
+df$MeanNucOcc[which(df$MeanNucOcc>1)]<-1
+colnames(df)[which(colnames(df)=="geneType.x")]<-"geneType"
+colnames(df)[which(colnames(df)=="geneClusterType.x")]<-"geneClusterType"
+ggplot(df, aes(x=phCons, y=PfamLengthRatio, color=geneType, size=GeneLength)) + 
+  geom_point() +  
+  #scale_color_manual(values=c('firebrick4', 'olivedrab')) +  
+  geom_smooth(method=lm) + 
+  labs(title="Co-expression against chromatin structure similarity", x="Adjusted co-expression score", y="Nucleosome Positioning correlation", color="Gene Type", size="Divergence")
+
+#
+merge(mutasomeTSS, regcode, by="Gene", all=F)->df
+x<-which(df$TFNo>50)
+plotStrConsTF<-ggplot(df[-x,], aes(x=MeanPromConstraint, y=TFNo, color=geneType)) +
+  geom_point() +
+  geom_smooth(method=lm) +
+  labs(title="Structural Constraint vs Regulation Complexity", x="Structural constraint in promoters", y="Number of TFBS in Promoter", color="Gene Type", size="Divergence") +
+  scale_color_manual(values=c('firebrick4', 'olivedrab', 'steelblue4'))
+#
+
+merge(seqconsTSS, mutasomeTSS, by="Gene", all=F)->df
+which(df$MeanPromConstraint>=-1 & df$MeanPromConstraint<=3)->x
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/SupplementaryFigure_PromPhConsPromStrucConsDensityPlot.pdf", height=5, width=6);ggplot(df, aes(x = MeanPromConstraint, y = MeanPromCons)) + geom_density_2d_filled() + labs(title="Sequence vs Structural Constraint in Promoters", x="Chromatin Constraint", y="Sequence Conservation", xlevel="density");dev.off()
+
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/SupplementaryFigure2_PromPhConsPromStrucConsDensityPlotbyType.pdf", height=5, width=6)
+ggplot(df, aes(x=MeanPromConstraint, y=MeanPromCons, color=geneType.x)) + 
+  geom_point() + 
+  scale_color_manual(values=c('firebrick4', 'olivedrab', "steelblue4")) +  
+  geom_smooth(method=lm) + 
+  labs(title="Promoter Conservation vs Promoter Structural Constraint", level="density")
+dev.off()
+```
+
+
+```{r}
+x<-which(fdata$ACS<=0.1 | fdata$ACS>6)
+
+nuccorplot<-ggplot(fdata[-x,], aes(x=log10(ACS), y=nucCor_SEQ, color=geneType, size=Distance_a_b_corrected)) + 
+  geom_point() +  
+  scale_color_manual(values=c('firebrick4', 'olivedrab')) +  
+  geom_smooth(method=lm) + 
+  labs(title="Co-expression against chromatin structure similarity", x="Adjusted co-expression score", y="Nucleosome Positioning correlation", color="Gene Type", size="Divergence")
+
+#
+x<-which(fdata$Jaccard_tf>0.5 | fdata$ACS<=0.1 | fdata$ACS>9)
+tfplot<-ggplot(fdata[-x,], aes(x=log10(ACS), y=Jaccard_tf, color=geneType, size=Distance_a_b_corrected)) + 
+  geom_point() +  
+  scale_color_manual(values=c('firebrick4', 'olivedrab')) +  
+  geom_smooth(method=lm) + 
+  labs(title="Co-expression against TF similarity", x="Adjusted co-expression score", y="Jaccard Index of TF similarity", color="Gene Type", size="Divergence")
+
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure6A_CorrelationACS_nucCor.pdf", height=5, width=5); nuccorplot; dev.off()
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure6B_CorrelationACS_jaccardtf.pdf", height=6, width=6); tfplot; dev.off()
+
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/ScatterPlot_CorrelationACS_nucCor_jaccardtf.pdf", height=6, width=12);
+ggarrange(nuccorplot, tfplot, ncol=2, nrow=1)
+dev.off()
+```
+
+## Figure 7, Variation along chromosomes in various measurements such as phCons, nucOcc, nucCons, pfamDensity
+
+```{r}
+library(ggplot2)
+library(dplyr)
+#
+nwindows<-10
+chrombinsize<-floor(chromsizes$chromsize/nwindows)
+valuesmat<-matrix(0, nrow = length(chromsizes$chr), ncol = nwindows)
+
+#df<-merge(nucPosClust, by="Gene", all=F)
+#df<-merge(df, nucPosClust, by="Gene", all=F)
+#df$tfdens<-df$TFNo/df$meanSpacer.x
+df<-merge(coords, nucPosClust, by="Gene", all=F) # make sure the df merged to coords contains the quantity you want to measure
+
+inputdf<-df
+#inputdf<-faresdnDomains[,c(1,2,3,4)]
+colnames(inputdf)[2:4]<-c("chr", "TSS", "TTS")
+
+# create values matrix
+for(chromno in 1:16){
+  i<-which(inputdf$chr==as.character(chromsizes$chr[chromno]))
+  values<-data.frame(start=inputdf$TSS[i], end=inputdf$TTS[i], val=inputdf$trNoise[i]) # change val=inputdf$XXXX to what you want to measure
+#
+  for(k in 0:(nwindows-1)){
+    selection<-which(values[,1]>=k*chrombinsize[chromno] & values[,2]<=(k+1)*chrombinsize[chromno])
+    valuesmat[chromno, (k+1)]<-mean(values$val[selection], na.rm=T)
+  }
+}
+# values matrix into data.frame
+valuesdf<-as.data.frame(valuesmat)
+colnames(valuesdf)<-paste(ceiling(seq(from=0, to=100, by=(1/nwindows)*100))[2:(nwindows+1)], "%", sep="")
+valuesdf<-stack(valuesdf)
+valuesdf<-data.frame(valuesdf, rep(chromsizes$chr,nwindows))
+colnames(valuesdf)<-c("MeanValue", "Percentile", "Chromosome")
+# plotting
+plotTFdens <-ggplot(valuesdf, aes(x=Percentile, y=`MeanValue`)) + geom_point(color='steelblue4', size = 0.8) + geom_smooth(method=lm, color='firebrick4') + stat_summary(fun.data=mean_sdl, fun.args = list(mult=1), geom="errorbar", color="firebrick2", width=0.2) + stat_summary(fun=mean, geom="point", color="firebrick2") + labs(title="Promoter Conservation", x="Chromosome Percentile Length", y="Mean phCons at [-250, 0] from TSS")
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/SupplementaryFigure_MeanPromoterConservation_alongChroms_errbars.pdf", height=4, width=5);plotTFdens;dev.off()
+```
+
+Figure 8. Modeling ACS scores with a combination of TF, nucCorSeq, DistTel
+```{r}
+x<-which(is.na(fdata$ACS) | is.na(fdata$Jaccard_tf) | is.na(fdata$nucCor_SEQ) | is.na(fdata$distTel) | is.na(fdata$Distance_a_b_corrected))
+y<-which(fdata$ACS<=0.1 | fdata$ACS>6)
+fdata1<-fdata[-union(x,y),]
+# separate models
+rfssd<-randomForest(ACS~Jaccard_tf+nucCor_SEQ+distTel, data=fdata1[which(fdata1$geneType=="SSD"),])
+rfwgd<-randomForest(ACS~Jaccard_tf+nucCor_SEQ+distTel, data=fdata1[which(fdata1$geneType=="WGD"),])
+# total model
+rfall<-randomForest(ACS~Jaccard_tf+nucCor_SEQ+distTel, data=fdata1)
+#
+data.frame(geneType=fdata1$geneType, Predicted=rfall$predicted, Real=fdata1$ACS, Divergence=fdata1$Distance_a_b_corrected)->test
+#
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Figure8_RFModeling_ACS_vs_distTel_nucCor_jaccardtf.pdf", height=6, width=6)
+ggplot(test, aes(x=Real, y=Predicted, color=geneType)) + geom_point(size=3) + geom_smooth(method=lm) + scale_color_manual(values=c('firebrick4', 'olivedrab')) + labs(title="Modeling Gene Duplicate Pair co-expression", x="Adjusted co-expression score", y="Random Forest Predicted Adjusted co-expression score", color="Gene Type")
+dev.off()
+```
+
+### Figure 9: Gene Relics
+```{r}
+df<-mergedf(coords, 4)
+tab1<-(table(df$geneClusterType[which(df$Gene %in% yeastRelicsSimilars)])/155)/(table(df$geneClusterType)/length(df$geneClusterType))
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/Figure9_EnrichmentSimilarityGeneRelics.pdf", height=5, width=7)
+par(mar=c(5,15,5,2));barplot(tab1[c(7,4,6,2,3,5,1)], horiz=T, las=1, col=rev(c("firebrick4", "steelblue4", "olivedrab", "firebrick4", "steelblue4", "olivedrab", "steelblue4")), names=rev(c("SSD in SSD Clusters", "Singletons in SSD Clusters", "WGD in SSD Clusters", "SSD in WGD Clusters", "Singletons in WGD Clusters", "WGD in WGD Clusters", "Singletons in Complement")), main="Enrichment of Genes with \nSimilarity to Gene Relics", cex.main=1.6, xlab="Observed/Expected Ratio", cex.axis=1.2, cex.lab=1.3, cex.names=1.3);abline(v=1,lty=2, col="grey20", lwd=3)
+dev.off()
+#
+source("~/Dropbox/Programs/R_functions/yeastgenomeplot.R")
+yeastRelicsCoords<-read.delim("~/Dropbox/Data/Lafontain2004_YeastGeneRelics/sacCer2_GeneRelics.bed", header=F, sep="\t")
+chromosomes<-read.table("~/Dropbox/Data/yeast_interactions_noble/saccer2_R.genome")[,1:4]
+cbind(yeastRelicsCoords, 1)->dfdata
+yeast.genome.plot(chromosomes, dfdata, "Gene Relics", "black", "black")
+#pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure9B_Domainogram_Relics.pdf", height=5, width=7)
+yeast.genome.plot(chromosomes, dfdata, "Gene Relics", "black", "black")
+#dev.off()
+
+```
+
+### Figure Gene Age and Length and Duplicate Enrichment
+```{r}
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/AllFigures/SupplementaryFigure_GeneLengthvsAge_vs_DuplicateEnrichments.pdf", height=4.5, width=8)
+beanplot(spacers$length[which(spacers$Gene %in% scerevisiae)], spacers$length[which(spacers$Gene %in% saccharomyces)], spacers$length[which(spacers$Gene %in% saccharomycetaceae)], spacers$length[which(spacers$Gene %in% saccharomycetales)],spacers$length[which(spacers$Gene %in% ascomycota)],spacers$length[which(spacers$Gene %in% fungi)], what=c(1,1,1,0), las=1, names=c("species", "genus", "family", "order", "division", "kingdom"), main="Gene Length vs Age and Duplicate Enrichment", xlab="Genes specific to", ylab="Gene Length", log = "y", ylim=c(50, 40000), col="dark grey");text(1,30000, "SSD:0.21", col="firebrick4");text(1,18000, "WGD:0.72", col="olivedrab");text(2,30000, "SSD:0.65", col="firebrick4");text(2,18000, "WGD:0.81", col="olivedrab");text(3,30000, "SSD:0.41", col="firebrick4");text(3,18000, "WGD:1.27", col="olivedrab");text(4,30000, "SSD:0.21", col="firebrick4");text(4,18000, "WGD:1.24", col="olivedrab");text(5,30000, "SSD:0.38", col="firebrick4");text(5,18000, "WGD:1.08", col="olivedrab");text(6,30000, "SSD:1.29", col="firebrick4");text(6,18000, "WGD:1.12", col="olivedrab");
+dev.off()
+```
+
+### Figure Average Profile Conservation:
+```{r}
+seqconsTSS[which(seqconsTSS$geneClusterType=="Singletons_in_SSDCluster"),]->x1
+x1[order(x1$MeanPromCons, decreasing = T),]->x1
+seqconsTSS[which(seqconsTSS$geneClusterType=="Singletons_in_WGDCluster"),]->x2
+x2[order(x2$MeanPromCons, decreasing = T),]->x2
+seqconsTSS[which(seqconsTSS$geneClusterType=="Singletons_in_ComplementCluster"),]->x3
+x3[order(x3$MeanPromCons, decreasing = T),]->x3
+rbind(x1,x2,x3)->x
+c(rep(1, length(x1[,1])), rep(2, length(x2[,1])), rep(3, length(x3[,1])))->xlabs
+ccols<-c("olivedrab", "firebrick4", "steelblue4")
+heatmap(as.matrix(x[,4:103]), Colv=NA, Rowv=NA, scale="none", RowSideColors=ccols[xlabs], labRow="", labCol="")
+
+#
+seqconsTSS[which(seqconsTSS$geneClusterType=="SSD_in_SSDCluster"),]->y1
+y1[order(y1$MeanPromCons, decreasing = T),]->y1
+seqconsTSS[which(seqconsTSS$geneClusterType=="SSD_in_WGDCluster"),]->y2
+y2[order(y2$MeanPromCons, decreasing = T),]->y2
+seqconsTSS[which(seqconsTSS$geneClusterType=="WGD_in_WGDCluster"),]->y3
+y3[order(y3$MeanPromCons, decreasing = T),]->y3
+seqconsTSS[which(seqconsTSS$geneClusterType=="WGD_in_SSDCluster"),]->y4
+y4[order(y4$MeanPromCons, decreasing = T),]->y4
+rbind(y1,y2,y3,y4)->y
+c(rep(1, length(y1[,1])), rep(2, length(y2[,1])), rep(3, length(y3[,1])), rep(4, length(y4[,1])))->ylabs
+ccols<-c("firebrick4", "firebrick2" , "olivedrab", "olivedrab2")
+heatmap(as.matrix(y[,4:103]), Colv=NA, Rowv=NA, RowSideColors=ccols[ylabs], scale="none", labRow="", labCol="")
+
+
+```
+
+## Table of Singleton Enrichments
+
+| DupList               | GeneList           | Enrichment | pvalue |
+|-----------------------|--------------------|------------|--------|
+| singletons            | TATA               | 0.8039109  | 0.000  |
+| Singletons/Complement | TATA               | 0.7744385  | 0.000  |
+| Singletons/SSD        | TATA               | 0.8684573  | 0.029  |
+| Singletons/WGD        | TATA               | 0.8167683  | 0.002  |
+| singletons            | TATAless           | 1.0366307  | 0.000  |
+| Singletons/Complement | TATAless           | 1.0787756  | 0.000  |
+| Singletons/SSD        | TATAless           | 0.9772000  | 0.160  |
+| Singletons/WGD        | TATAless           | 0.9874464  | 0.252  |
+| singletons            | LowExpression      | 0.9424414  | 0.057  |
+| Singletons/Complement | LowExpression      | 1.0161542  | 0.398  |
+| Singletons/SSD        | LowExpression      | 0.8270492  | 0.055  |
+| Singletons/WGD        | LowExpression      | 0.8975718  | 0.159  |
+| singletons            | HighExpression     | 0.5591905  | 0.000  |
+| Singletons/Complement | HighExpression     | 0.5363036  | 0.000  |
+| Singletons/SSD        | HighExpression     | 0.5941546  | 0.001  |
+| Singletons/WGD        | HighExpression     | 0.6336879  | 0.001  |
+| singletons            | Essential          | 1.2525965  | 0.000  |
+| Singletons/Complement | Essential          | 1.3461713  | 0.000  |
+| Singletons/SSD        | Essential          | 1.0691810  | 0.150  |
+| Singletons/WGD        | Essential          | 1.2049206  | 0.000  |
+| singletons            | Non-Essential      | 0.7792292  | 0.000  |
+| Singletons/Complement | Non-Essential      | 0.7910199  | 0.000  |
+| Singletons/SSD        | Non-Essential      | 0.7725476  | 0.000  |
+| Singletons/WGD        | Non-Essential      | 0.7547999  | 0.000  |
+| singletons            | Laurasia           | 1.0848432  | 0.000  |
+| Singletons/Complement | Laurasia           | 1.0437330  | 0.038  |
+| Singletons/SSD        | Laurasia           | 1.0433818  | 0.139  |
+| Singletons/WGD        | Laurasia           | 1.2285444  | 0.000  |
+| singletons            | Godwana            | 1.0636195  | 0.003  |
+| Singletons/Complement | Godwana            | 1.0036091  | 0.454  |
+| Singletons/SSD        | Godwana            | 1.0967064  | 0.090  |
+| Singletons/WGD        | Godwana            | 1.1816136  | 0.000  |
+| singletons            | Antarctica         | 1.1125062  | 0.001  |
+| Singletons/Complement | Antarctica         | 1.2192226  | 0.001  |
+| Singletons/SSD        | Antarctica         | 1.2046300  | 0.025  |
+| Singletons/WGD        | Antarctica         | 0.8344969  | 0.050  |
+| singletons            | Tethys             | 0.9181781  | 0.000  |
+| Singletons/Complement | Tethys             | 0.9860136  | 0.000  |
+| Singletons/SSD        | Tethys             | 0.9468643  | 0.009  |
+| Singletons/WGD        | Tethys             | 0.8136048  | 0.034  |
+| singletons            | Scerevisiae        | 0.8738564  | 0.000  |
+| Singletons/Complement | Scerevisiae        | 0.7087210  | 0.000  |
+| Singletons/SSD        | Scerevisiae        | 1.0944802  | 0.120  |
+| Singletons/WGD        | Scerevisiae        | 1.2062742  | 0.005  |
+| singletons            | Saccharomyces      | 1.0624883  | 0.158  |
+| Singletons/Complement | Saccharomyces      | 1.0513675  | 0.325  |
+| Singletons/SSD        | Saccharomyces      | 0.9947143  | 0.424  |
+| Singletons/WGD        | Saccharomyces      | 1.0558478  | 0.318  |
+| singletons            | saccharomycetaceae | 1.1030640  | 0.017  |
+| Singletons/Complement | saccharomycetaceae | 0.8115745  | 0.036  |
+| Singletons/SSD        | saccharomycetaceae | 1.6892537  | 0.000  |
+| Singletons/WGD        | saccharomycetaceae | 1.2914095  | 0.017  |
+| singletons            | saccharomycetales  | 1.1879804  | 0.000  |
+| Singletons/Complement | saccharomycetales  | 1.2769134  | 0.000  |
+| Singletons/SSD        | saccharomycetales  | 1.0631338  | 0.262  |
+| Singletons/WGD        | saccharomycetales  | 1.1136239  | 0.121  |
+| singletons            | ascomycota         | 1.1304765  | 0.001  |
+| Singletons/Complement | ascomycota         | 1.0471556  | 0.251  |
+| Singletons/SSD        | ascomycota         | 1.2033233  | 0.040  |
+| Singletons/WGD        | ascomycota         | 1.2747407  | 0.012  |
+| singletons            | fungi              | 1.0135515  | 0.025  |
+| Singletons/Complement | fungi              | 1.0538811  | 0.000  |
+| Singletons/SSD        | fungi              | 0.9532257  | 0.015  |
+| Singletons/WGD        | fungi              | 0.9736888  | 0.088  |
+
+
+
+### 8. Structural and regulatory aspects related to gene co-expression (measured as ACS)
+
+
+### 9. Duplicate vs Neighborhood analysis
+
+
+### 10. Duplicate vs Neighborhood synteny
+
+## Text (parts of it are obsolete)
+
+## Introduction
+
+Gene duplication is one of the major processes driving the innovation in complex genomes. The fate of the duplicated copies varies. The great majority rapidly accumulate mutations and fossilize in pseudogenes that quickly become indistinguishable from the background non-coding genomic regions. A small percentage of cases, which becomes important through selection, follow two alternative evolutionary courses with varying degrees of functional specialization. Duplicate gene copies may thus escape the erosive fate of redundancy by either developing a more specialized functional role, becoming expressed in different cellular compartments or contexts (subfunctionalization), or by acquiring a different function altogether (neofunctionalization).
+
+The degree and extent with which the three alternative fates (erosion, sub- and neo-functionalization) occurs, is a complex function depending on various parameters. A number of works have addressed many of them, including the diversification of gene regulation, the number of genetic interactions in which the paternal gene is involved, the complexity and entanglement of its protein domains/functions etc. Most of these treat the two daughter genes as linked or entangled from their birth through an “invisible thread” regardless of their genomic context. Nevertheless the genomic environment, in which a gene is embedded is an important determinant of its function and evolution shaped by epigenetic factors and access to (and by) transcriptional regulators in the three-dimensional genomic landscape. This genomic context can be very different depending on: a) the age of the duplication event, b) its extent (if it is the result of a large scale polyploidy event or a small-scale tandem duplication) c) the immediate aftermath of the event in terms of gene positions in the genome (in tandem or not) and d) the “volatility” of this positioning as it is shaped by genomic rearrangements in evolutionary time. 
+
+In this work we set out to study the overlooked effect of the genomic environment in the duplicate gene fate in the yeast S. cerevisiae with its complex evolutionary history that includes an ancient whole-genome duplication and almost 1/3 of its total genes being members of duplicate pairs. By analyzing the evolutionary background of ~2000 duplicate genes, taking into account their functional, regulatory and expression divergence we model the expression divergence between paralog genes on a number of parameters, which for the first time include the influence of the genomic context. Our modeling approach combines aspects of social, agent-based models, association rules and ….
+
+
+Updates - Fall 2020
+
+Gene duplication is one of the major mechanisms driving evolution (Ohno).
+
+It can occur either through localized segmental duplication due to replication errors, resulting in small scale duplicates that are initially in tandem, or through genome wide duplication. 
+
+Yeast has undergone at least one such genome-wide event, which was followed by a massive purge of duplicate/redundant genes (Wolfe).
+
+Yeasts, as well as numerous other genomes have undergone a whole-genome duplication (WGD), with a number of duplicated genes being maintained in modern day genomes. At the same time isolated, small-scale gene duplication (SSD) events are occurring at a steady rate. This leads to a large number of duplicated genes in the genome of S. cerevisiae (~2000 or more than 30%).  
+
+Modern day yeast genomes contain around ~1000 duplicate gene pairs as opposed to ~4000 singletons (Wolfe, Kellis). Duplicate genes are roughly equally divided between small-scale (SSD) and whole-genome (WGD) duplicates (Fares etc)
+ 
+The dynamics of the two types are quite different. We know that:
+
+- SSDs are accumulating more SNPs (Keane 2014)
+
+- SSDs have greater expression variability (Keane, 2014; Tirosh and Barkai ?)
+
+- Subfunctionalization is dependent on the domain structure of the initial protein and not on the mode of duplication (Kuzmin, 2020) <- can we check this?
+
+- Stress-related genes are more prone to duplication loss (“experimentation”). (Wapinski 2007)
+
+- Duplicates diverge at the level of regulation, not function (Wapinski, 2007)
+
+- There appears to be selection for increased gene expression for gene retention. Highly-expressed genes are over-represented among duplicates (Seoighe and Wolfe, 1999) <- is it equally distributed between WGD/SSD?
+
+- Different fates for gene duplicates exist. Some retain function, others similar, others different (sub/neofunctionalization) (Baudot et al, 2004) (Fares papers?)
+
+- Semantic similarity analysis shows that WGDs are less likely to be essential, WGDs are functionally more similar (subfunctionalization), WGDs are over-represented in protein complexes (Hakes, 2007)
+
+- Adjacent genes that are created as new pairs tend to have wider spacing. This is a bias not existing for WGD genes (Byrnes, Mol Biol Evol, 2006) 
+
+- Gene relics “pseudogenes” are also enriched in telomeres (like SSD). (Lafontaine, Gene 2004)
+
+- Gene loss post-WGD is non-random with genes with small distances being more likely to be deleted (van Hoek and Hogeweg 2007) * <- not very convincing
+
+Empirical data shows that whole-genome duplications (WGDs) are more likely to be retained than small-scale duplications (SSDs), though their relative contribution to the functional fate of duplicates remains unexplored. (Ref)
+regulatory and functional potential (Papanikolaou 2009).
+
+Overall, genes that have been part of a whole-genome duplication and genes that are the result of small-scale duplications show distinct functional, regulatory and evolutionary fates. 
+
+We have recently studied the spatial distribution of yeast genes at the level of gene co-expression (Tsochatzidou, 2017) and structural conformation (Nikolaou, 2018), showing that positional constraints may shape the gene expression potential of genes as well as the acquisition of discrete functional roles. In the past and for a model bacterial species (Salmonella) we have also observed that duplicated genes that do not preserve their genomic neighborhood are, on average, under less selective pressure, thus establishing a strong association between gene order, and regulatory and functional potential (Papanikolaou 2009). In this work we focus on the differential fate of whole-genome vs small-scale duplicated genes in the budding yeast S. cerevisiae, to show that spatial, topological constraints may also shape the fate of gene duplicates towards conservation, sub- or neo-functionalization.
+
+
+2.
+Data and Methods
+
+2.1 SSD/WGD Classification 
+Data from Fares et al?
+
+2.2 Essential/High-low expressed genes/TATA-TATA-less genes
+Standard gene lists 
+
+2.3 Gene coregulation 
+ACS data
+Expression conservation between yeast and Candida (Tirosh Barkai 2007)
+
+2.4 Robustness of domain retention
+Rate of retention (Diss et al 2017)
+
+2.5 Genetic interaction data
+Genetic interaction maps (Costanzo et al 2010)
+
+
+3.
+Results
+3.1 Different modes of Gene Duplication in yeast 
+Gene duplicates have two distinct origins in the yeast genome. Gene copies maintained from an ancestral whole-genome duplication and genes being duplicated in short-scale, with the first having greater probability to persist and the second being more likely to diversify in new functions. 
+Our goal in this work was to analyze how the local and global positioning of gene duplicates may underlie their distinct evolutionary, regulatory and functional fate. We show that WGD and SSD differ in a number of aspects that are also related to gene positioning, which is suggestive of different genomic environments being more “permissive” for each evolutionary mode. More interestingly we show that the genomic environment exerts a variable effect on the embedded genes which is reflected in their chromatin structure. We propose that chromatin conformation and nucleosome positioning in particular may act as a “soft” constraint that subsequently shapes more complex regulatory and functional properties of genes in accord with those in their general proximity.
+A number of studies have addressed the tendency of genes to be positioned along the linear chromosomes with regulatory, expression and functional relationships. The prototype for such tendencies are of course the bacterial operons. Even though operons exist in eukaryotes, such as nematodes, they are not abundant. In most species, spatial-functional relationships are less constrained, materializing at the levels of loose co-expression [Refs] and similar regulatory control [Babu]. Such preferences, shaped over evolution, are more easily discernible in unicellular eukaryotes such as yeast. In recent works we have pointed out the spatial-functional compartmentalization that underlies the architecture of the yeast genome. 
+Ιn this work we focus our attention on gene duplicates, which comprise almost one third of the total protein coding genes in yeast. We analyze a number of properties for both small scale and whole-genome duplication gene pairs to show that their evolutionary modes and subsequent fate post-duplication is largely being shaped by the genomic context. We compiled a large compendium of data related to genomic annotation, gene expression, regulation and transcriptional conservation, genetic interactions, chromatin structure and nucleosome positioning, coupled with the product of our own analyses regarding genomic segmentation in yeast. We used this to assess >1000 duplicate gene pairs to show that their fate is largely context dependent and to consolidate the role of the genomic environment in the evolution and functional diversification of gene potential in yeast. [Come back to this point for implications in multicellular species in the discussion]
+Duplicate genes that are traced to an ancient whole genome duplication (from hereon “WGD genes”) are generally more constrained both functionally and evolutionarily. They are less diverged (Divergence, p=0.038) and retain to a larger part the same regulatory binding sites in their promoters (Jaccard TF, p=0.037) compared to small scale duplicates (henceforth “SSD genes”). This is indicative of different modes of evolution for the two types of gene duplications. WGD genes are more often functionally redundant copies, employed for the “subfunctionalization” of process in different cellular compartments or under different conditions. SSD genes are more prone to “neofunctionalization”, meaning a more radical diversification of functional roles that leads to genomic novelty. 
+
+3.1 Positional Preferences of WGD and SSD genes
+We started by evaluating particular positional preferences of duplicate genes. We wanted to see whether SSD and WGD genes tend to occupy distinct positions in the yeast genome, so we created extended chromosomal SSD- and WGD-regions by merging SSD and WGD genes found within 5kbp from each other. We then assessed the overlap of the two sets of coordinates and compared it to a distribution of overlaps from random permutations of the coordinates of equal size and chromosomal representation, as described in (Andreadis et al, 2014). We found a markedly smaller overlap than expected by chance (p=….) which persisted even when we extended the regions to 10kbp, suggesting that WGD and SSD genes reside in different genomic regions. In order to identify whether they exhibit particular positional preferences we examined their propensity to lie at the edges of chromosomes by quantifying their distance from chromosomal ends. Since chromosomal arms are asymmetrical in size, we used a scaled center-end distance, with 0 being the chromosomal end and 0.5 being the centrome (see Nikolaou et al., 2018). We found a notable difference in the positioning of the two types of duplicates with SSD genes being preferentially positioned towards chromosomal ends, compared to WGD ones (p=~0.001). This preference cannot be attributed to the evolutionary divergence, as there is no significant correlation between distance from the chromosomal end and scaled gene pair divergence (cc=0.045, p=0.416). 
+The bias for the end of chromosomes is more likely to be due to constraints that underlie small-scale duplications events. As these occur in tandem it is reasonable to expect that they will occur more frequently in genomic areas with broader non-coding space. Subtelomeric regions, being less gene-dense than the centres of yeast chromosomes are thus more fertile ground for the gene duplication occurring at small scale. This is supported by simple analyses based on gene annotation. When we calculated the percentage of genomic space covered by protein-coding genes in 10kb-windows centered around each yeast gene, we found significantly small percentages for SSD compared to WGD genes (p<=10-4). Relative to that, SSD genes are in general ~150bps longer than WGD ones (means of 1768 vs 1616, p=0.003), which has been already suggested by a recent work where SSD-related neofunctionalization is attributed to the existence of multiple non-overlapping protein domains (Kuzmin et al, 2020) and these are naturally to be found in longer genes.     
+
+3.2 Co-regulation of gene duplicates is dependent on gene context as well as on divergence  
+We analyzed duplicate gene co-expression and co-regulation drawing expression data from SPELL and TF binding sites obtained from a genome-wide study (McIsaac). 
+We wanted to assess the degree to which duplicate genes are co-expressed, and/or under similar regulatory queues when taking into account their divergence rates. Divergence rates are higher for SSD that WGD genes and for duplicate genes that lie on different chromosomes, regardless of their origin. The differences are not, however, particularly strong. In or
+
+3.3 Chromatin Structure as a shaping factor of gene duplication fate 
+The distinct positional preferences of gene duplicates are associated with chromatin and overall structural properties. The particular three dimensional organization of the yeast genome inside the nucleus (Rabl) has direct implications in the smaller-scale structure of genes at the level of nucleosome positioning. In a recent work we showed that the yeast genome is compartmentalized in self-contained areas, within which genes show consistent nucleosome occupancy profiles (Nikolaou, 2018). We analyzed the distribution of duplicate genes in these domains and expectedly found SSD and WGD genes to be enriched and depleted respectively, in the subtelomeric domains. A question that follows from this analysis is how genes of a duplicate pair segregate into nucleosomal domains. Do they fall in domains of the same type or not and to what extent does this correlate with the functional and regulatory divergence?
+
+We will show that -given the divergence between duplicates- their co-expression rate is associated more strongly with the environment and the nucleosome positioning patterns than with the transcription factor binding sites in their promoters.
+
+Analyses to RUN:
+
+Take extended SSD/WGD regions, exract underlying genes and search for the TFs (from Harbison) that may (or may not) be enriched in each type. Compare with singleton clusters. Expect that higher numbers and more complex regulation is found in SSDs. -> Also, do the difference suggest compartments of different gene regulation? What comes first? the position or the regulatory pattern?
+
+Extract domains for TF similarity (or something similar) and check how this is related to ACS/Co-expression compared to NucDomains
+
+Analysis to run -> All vs all nucleosome positioning correlations
+
+SOS: Analysis of Nucdomains -> gene duplicate pairs -> divergence etc
+Key Findings:
+
+1.SSD genes tend to be found away from regions that are enriched in WGD genes, suggesting of distinct genomic “niches” for more ancient as opposed to more recent duplication events.
+
+A.There is a general lack of clustering for both WGD and SSD as their closest gene distances suggest they are not constrained to be in proximity compared to a random selection of an equal number of singletons.
+B.There is however a tendency for WGD and SSD to occupy different spaces in the genome as is suggested by a significant lack of overlap. When extending each gene to a 5kbp area (and thus creating broader “regions of enrichment”) we find a significant lack of overlap between WGD and SSD, while both are found to have an expected overlap with a random selection of singleton genes.
+C.There is a tendency for SSD genes to be positioned in “wider” genomic spaces with smaller coding density albeit this may be due to their being enriched in telomeric sequences.
+
+2.The above observation is linked to the overall enrichment of SSD in telomeric regions and genomic positions corresponding to TAD boundaries. 
+
+Similarly to the points made above, the strong enrichment of SSD genes in Cluster 6 is due to their subtelomeric positioning. 
+[SOS, substitute values of ALL genes with singleton genes ONLY in the table below]
+	SSD		WGD		All 	
+	Enrichment	P-value	Enrichment	P-value	Enrichment	P-value
+Cluster 1 Open NFR Long	0.964	0.222	1.030	0.297	1.023	0.194
+Cluster 2
+Open NFR Short	1.023	0.389	1.061	0.182	0.990	0.348
+Cluster 3
+Open NFR
+Late Replicating	1.134	0.158	1.146	0.142	1.008	0.466
+Cluster 4
+Very Open NFR, Conserved	0.903	0.200	1.166	0.082	1.042	0.250
+Cluster 5
+Repressed Occupied	0.976	0.426	0.935	0.240	0.974	0.302
+Cluster 6
+Subtelomeric 	2.028	0.006	0	N/A	0.636	0.024
+Boundaries	1.076	0.244	0.824	0.027	0.965	0.185
+
+
+A.SSD genes show smaller distances from telomeres (boxplots) 
+B.SSD genes are significantly enriched in TAD boundaries (heatmap)
+
+- Data suggest that WGD and SSD (the latter more prominently) tend to occupy specific genomic “niches” that are not shared between them. This may also be suggestive of (or perhaps even driven by) different functional constraints between them, which would be highly indicative of a functional compartmentalization of gene duplicates. 
+
+3.WGD genes tend to preserve their relative locations (as judged by synteny relationships), while SSD predominantly lie in areas where syntenic patterns are disrupted.
+
+Α. Boxplots showing synteny scores. Explanation of synteny scores
+* This is a bit “soft”. Synteny is preserved in WGD because we are looking at post-WGD organisms.
+
+
+ 
+4.The aforementioned regions are known to be depleted in synteny. In fact the existence of high synteny (even post WGD) is the major determinant of WGD classification, followed by the decreased conservation and localization in a different chromosome (in a decision tree model).
+- Conditional tree model?
+
+
+5.WGD genes have been suggested to be partitioning ancestral functions while SSD duplicates are promoting neo-functionalization. In this respect we find WGD to have comparable similarity with SSD in terms of gene regulation (similar percentage of common TF binding sites in the promoters of the gene pair) in spite of the fact that they are less conserved (as expected). 
+
+Α. Correlations (Jaccard index) of TFs is comparable between WGD and SSD pairs, even though WGD genes are less conserved/more diverged.
+B. This suggests that neo-functionalization is associated with gene regulation (support with references, because others have seen this for sure)
+
+- How to plot this? 
+
+6. Gene pair co-expression is *more* correlated with structural similarity (R=0.156, p<=10-7) than with overall gene conservation (R=0.128, p<=10-5) and TF-binding site similarity (R=0.05). It thus appears that structural similarity (at the level of nucleosome occupancy) is a more direct factor shaping gene co-expression. The correlation is twice stronger for SSD compared to WGD, even though the same correlation for conservation is comparable. This means that nucleosome positioning may function as “buffer” in maintaining co-expression levels. 
+
+- Important. One whole figure should be dedicated to show connection of co-expression with structural similarities (nucleosomes, domains)
+
+7.IMPORTANT POINT: Co-expression is particularly high when both genes are close to the telomeres (?). This is almost entirely due to SSD genes. SSD genes close to the center of the chromosomes do not show high co-expression. SSD genes duplicated in tandem close to the telomeres show the highest co-expression.
+
+- Strange. Why should it be like this? 
+A: Are SSD when both at telomeres less diverged than SSDs towards the center? If yes we can argue that they become more diverged as they move to the center. -> No, they are not. ACS scores are significantly higher for SSD genes with <=0.01 product of telomere distances but divergences are similar. The differences in ACS scores is not observed for WGD.
+B. Are SSD both at telomeres have more similarity in TF? -> No, Jaccard TFs are similar
+C.Are SSD both at telomeres have more similarity in nuclesomes -> Yes, they do. The means for nucCorProm are 0.181 vs 0.048 (p<=0.0005) and for sequences 0.165 vs 0.071 (p<=0.002). 
+
+This suggests that:
+A)SSD have different modes than WGD regardless of divergence, co-regulation etc, simply at the level of positional constraints
+B)Co-regulation (TF similarity) is not necessarily reflected on co-expression (ACS). [Show this in general with higher correlations for ACS->nucCor against ACS->JaccardTF]. 
+C)even though SSDs may be similarly created at the center or the end of the chromosomes their structure is more similar when found at the telomeres and this many be responsible for their similar gene expression patterns.
+Does this mean that neo-functionalization occurs more easily when genes of the pair are NOT both found in the telomeres?-> but Divergence is not very different. (?)
+
+
+8.Co-expression in neighborhood is correlated with pair co-expression (why?)
+
+Using the map of genetic interactions and the re-sequencing of 27 Saccharomyces cerevisiae genomes evolving for 2,200 generations we show that SSD-duplicates lead to neo-functionalization while WGD-duplicates partition ancestral functions. This conclusion is supported by: (a) SSD-duplicates establish more genetic interactions than singletons and WGD-duplicates; (b) SSD-duplicates copies share more interaction-partners than WGD-duplicates copies; (c) WGD- duplicates interaction partners are more functionally related than SSD-duplicates partners; (d) SSD-duplicates gene copies are more functionally divergent from one another, while keeping more overlapping functions, and diverge in their sub- cellular locations more than WGD-duplicates copies; and (e) SSD-duplicates complement their functions to a greater extent than WGD–duplicates.
+
+9.Different Association Rules in SSD/WGD duplicates
+When assessing the degree of association between transcription factors regulating different sets of genes, duplicates shows different preferences from singletons and WGD genes different from SSD. 
+
+
+Outline
+Property	Mean-SSD	Mean-WGD	P-value
+ACS	2.058	2.089	0.698
+Common TF	0.195	0.196	0.873
+Mean Telomere Distance (scaled)	0.237	0.260	0.001
+Common Neighbourhood TFs	0.215	0.224	0.045
+*Synteny Score	0.880	0.870	0.224
+Synteny Score (preWGD)	0.580	0.831	10-16
+Mean Conservation	0.764	0.701	10-11
+*Mean Neighborhood ACS	1.33	1.31	0.205
+Nucleosome Pattern Correlation	0.088	0.059	0.046
+Mean Distance from ARS	13586.2	13106.4	0.407
+Mean Distance from Centromere (scaled)	0.508	0.478	0.036
+			
+Properties marked with an asterisk show interesting trends and have a Wilcoxon p<0.05.
+ 
+3.1 WGD vs SSD genes in various gene contexts
+Notice: Not all SSD genes were found in the dataset we have available at the moment 
+
+Gene Set	WGD	SSD	Ratio	p-value
+All genes	1078	977		
+				
+				
+Xx
+Gene Set	Background	SSD	WGD	Odds/Ratio	p-value
+High Expression Frequency	373	83	159	0.62	0.162
+Low Expression Frequency	495	96	115	Genome-wide Enrichment (SSD, WGD)
+Ratio High/Low	0.75	0.86	1.38	1.14	1.84
+Xxx
+Gene Set	Background	SSD	WGD	Odds/Ratio	p-value
+TATA-containing genes	1072	254	284	0.98	0.880
+TATA-less genes	4685	723	794	Genome-wide Enrichment (SSD, WGD)
+Ratio High/Low	0.22	0.35	0.36	1.59	1.63
+xxxx
+Gene Set	Background	SSD	WGD	Odds/Ratio	p-value
+Essential genes	1090	186	59	4.06	10-22
+Non-essential genes	5602	791	1019	Genome-wide Enrichment (SSD, WGD)
+Ratio Essential/non-Essential	0.19	0.24	0.06	1.26	0.04
+Xxx
+Comparison of the two genes in each pair
+Gene Set	Background	Both	One	None
+	SSD	52	84	368
+	WGD	2	55	482
+Essential	1090			
+Xxx
+Gene Set	Background	Both	One	None
+	SSD	22	48	434
+	WGD	57	45	437
+HighFrequency	373			
+Xxx
+Gene Set	Background	Both	One	None
+	SSD	7	84	413
+	WGD	11	93	435
+Low Frequency	495			
+Xxx
+Gene Set	Background	Both	One	None
+	SSD	78	108	308
+	WGD	58	168	313
+TATA-containing	1073			
+
+
+
+# Appendix
+```{r, Get Neighborhoods, already run in IMBB}
+Aneighb<-list()
+for(i in 1:length(fdata$geneNameA)){
+  x<-which(coords$Gene %in% fdata$geneNameA[i]) 
+  if(x>=6){
+  if(length(unique(coords$chr[(x-5):(x+5)]))==1){
+    Aneighb<-c(Aneighb, list(coords$Gene[(x-5):(x+5)]))
+  }
+  if(length(unique(coords$chr[(x-5):(x+5)]))>1){
+    Aneighb<-c(Aneighb, list(rep("",11)))
+  }
+  }
+  if(x<6){Aneighb<-c(Aneighb, list(rep("",11)))}
+}
+names(Aneighb)<-fdata$geneNameA
+#
+Bneighb<-list()
+for(i in 1:length(fdata$geneNameB)){
+  x<-which(coords$Gene %in% fdata$geneNameB[i])
+  if(x>=6){
+  if(length(unique(coords$chr[(x-5):(x+5)]))==1){
+    Bneighb<-c(Bneighb, list(coords$Gene[(x-5):(x+5)]))
+  }
+  if(length(unique(coords$chr[(x-5):(x+5)]))>1){
+    Bneighb<-c(Bneighb, list(rep("",11)))
+  }
+  } 
+  if(x<6){Bneighb<-c(Bneighb, list(rep("",11)))}
+}
+names(Bneighb)<-fdata$geneNameB
+```
+
+
+#```{r, ACS scores, already run in IMBB, Data incorporated in MKalyva...ACS.tsv file}
+acs<-read.delim("~/Dropbox/Data/SPELL/Allgenes_ACS/All_ACS_scores_ranks_list.tsv", header=F, sep="\t"); colnames(acs)<-c("gene1", "geneA", "gene2", "geneB", "ACS", "rank")
+# For gene pairs
+pnum<-vector("numeric", length(fdata$geneNameA))
+pACS<-vector("numeric", length(fdata$geneNameA))
+pRnk<-vector("numeric", length(fdata$geneNameA))
+for(l in 1:length(fdata$geneNameA)){
+#
+which((acs$geneA %in% fdata$geneNameA[l] | acs$gene1 %in% fdata$geneNameA[l]) & (acs$geneB %in% fdata$geneNameB[l] | acs$gene2 %in% fdata$geneNameB[l]))->x
+pACS[l]<-mean(acs$ACS[x])
+pRnk[l]<-mean(acs$rank[x])
+pnum[l]<-length(x)
+}
+#
+# For neighbourhoods
+numa<-vector("numeric", length(fdata$geneNameA))
+mRnka<-vector("numeric", length(fdata$geneNameA))
+mACSa<-vector("numeric", length(fdata$geneNameA))
+numb<-vector("numeric", length(fdata$geneNameA))
+mRnkb<-vector("numeric", length(fdata$geneNameA))
+mACSb<-vector("numeric", length(fdata$geneNameA))
+
+for(l in 1:length(fdata$geneNameA)){
+glist<-Aneighb[[l]] # as factor
+#
+which((acs$geneA %in% glist | acs$gene1 %in% glist) & (acs$geneB %in% glist | acs$gene2 %in% glist))->x
+mACSa[l]<-mean(acs$ACS[x])
+mRnka[l]<-mean(acs$rank[x])
+numa[l]<-length(x)
+#
+glist<-Bneighb[[l]] # as factor
+#
+which((acs$geneA %in% glist | acs$gene1 %in% glist) & (acs$geneB %in% glist | acs$gene2 %in% glist))->x
+mACSb[l]<-mean(acs$ACS[x])
+mRnkb[l]<-mean(acs$rank[x])
+numb[l]<-length(x)
+#}
+```
+
