@@ -48,8 +48,8 @@ Our findings point towards an architectural segregation of function, regulation 
 8.  Gene Regulatory binding sites. Regulatory binding site information was obtained from [Mc Isaac et al., 2006](https://bmcbioinformatics.biomedcentral.com/articles/10.1186/1471-2105-7-113): [Regulatory Code](files/sacCer2_RegulatoryCode.tsv)
 
 9.  Sequence and Structural Constraints along the TSS of genes. 
-   1.  Sequence Conservation Patterns along the TSS of all yeast genes were created with aggregation of PhastCons Scores: [Sequence Conservation](files/sacCer2_PhastCons_TSS_profiles.tsv)
-   2.  Structural Conservation Patterns were created in the same way using the model of [(Routhier et al., 2020)](https://genome.cshlp.org/content/early/2021/01/19/gr.264416.120): [Structural Conservation](files/sacCer2_strucCons_TSS_profiles.tsv)
+    1.  Sequence Conservation Patterns along the TSS of all yeast genes were created with aggregation of PhastCons Scores: [Sequence Conservation](files/sacCer2_PhastCons_TSS_profiles.tsv)
+    2.  Structural Conservation Patterns were created in the same way using the model of [(Routhier et al., 2020)](https://genome.cshlp.org/content/early/2021/01/19/gr.264416.120): [Structural Conservation](files/sacCer2_strucCons_TSS_profiles.tsv)
     
 10. PFAM domains and Protein-protein interactions
     1.  PFAM domains were obtained for each yeast gene and then their number and length ratio in the gene was calculated: [Yeast Genes PFAM Domains](files/YeastGenes_PFAM_Domains.tsv)
