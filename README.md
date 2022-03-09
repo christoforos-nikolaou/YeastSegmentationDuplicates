@@ -55,3 +55,5 @@ Our findings point towards an architectural segregation of function, regulation 
     1.  PFAM domains were obtained for each yeast gene and then their number and length ratio in the gene was calculated: [Yeast Genes PFAM Domains](files/YeastGenes_PFAM_Domains.tsv)
     2.  Protein-protein interactions were obtained from [STRING-DB](https://string-db.org/) and the number of interaction for each gene was calculated on the basis of experimental evidence: [Yeast Genes PPI](files/YeastGenes_Number_STRING_PPI.tsv)
 
+11. Yeast Gene Duplicate Comparisons. General comparisons in terms of sequence divergence, co-expression, structural and regulatory similarity, are contained in: [Yeast Duplicate Comparisons](files/Yeast_GeneDuplicates_Comparisons.tsv)
+
