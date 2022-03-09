@@ -51,9 +51,11 @@ Our findings point towards an architectural segregation of function, regulation 
    1.  Sequence Conservation Patterns along the TSS of all yeast genes were created with aggregation of PhastCons Scores: [Sequence Conservation](files/sacCer2_PhastCons_TSS_profiles.tsv)
    2.  Structural Conservation Patterns were created in the same way using the model of [(Routhier et al., 2020)](https://genome.cshlp.org/content/early/2021/01/19/gr.264416.120): [Structural Conservation](files/sacCer2_strucCons_TSS_profiles.tsv)
     
-10. PFAM domains and Protein-protein interactions.
+10. PFAM domains and Protein-protein interactions
     1.  PFAM domains were obtained for each yeast gene and then their number and length ratio in the gene was calculated: [Yeast Genes PFAM Domains](files/YeastGenes_PFAM_Domains.tsv)
     2.  Protein-protein interactions were obtained from [STRING-DB](https://string-db.org/) and the number of interaction for each gene was calculated on the basis of experimental evidence: [Yeast Genes PPI](files/YeastGenes_Number_STRING_PPI.tsv)
 
-11. Yeast Gene Duplicate Comparisons. General comparisons in terms of sequence divergence, co-expression, structural and regulatory similarity, are contained in: [Yeast Duplicate Comparisons](files/Yeast_GeneDuplicates_Comparisons.tsv)
+11. Yeast Gene Duplicate Comparisons 
+    1.  General comparisons in terms of sequence divergence, co-expression, structural and regulatory similarity, are contained in: [Yeast Duplicate Comparisons](files/Yeast_GeneDuplicates_Comparisons.tsv).
+    2.  A more detailed dataset with a full compilation of many attributes may be found [here]()
 
