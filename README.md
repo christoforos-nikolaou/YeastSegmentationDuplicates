@@ -59,3 +59,6 @@ Our findings point towards an architectural segregation of function, regulation 
     1.  General comparisons in terms of sequence divergence, co-expression, structural and regulatory similarity, are contained in: [Yeast Duplicate Comparisons](files/Yeast_GeneDuplicates_Comparisons.tsv).
     2.  A more detailed dataset with a full compilation of many attributes may be found [here]()
 
+## R Code
+
+Accompanying R code may be found in a detailed R-markdown file [here](Supplementary_R_code.rmd)
