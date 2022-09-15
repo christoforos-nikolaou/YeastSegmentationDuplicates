@@ -22,7 +22,6 @@ library(randomForest)
 library(ggfortify)
 library(ggplot2)
 library(RColorBrewer)
-#library(heatmap.plus)
 library(arules)
 library(arulesViz)
 library(knitr)
@@ -51,7 +50,7 @@ dupgenes<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/sacCe
 # Most updated dataset
 completedata<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/Duplicate_Genes_Full_file_1054_pairs_new.tsv", header=T, sep="\t")
 ###
-fdata<-read.delim("MKalyva_Duplicated_genes2019_ACS.tsv", header=T, sep="\t")
+fdata<-read.delim("~/Dropbox/github/YeastSegmentationDuplicates/files/Duplicated_genes_ACS.tsv", header=T, sep="\t")
 fdata$distTel<-(fdata$distTelomerA+fdata$distTelomerB)/2
 fdata$distCent<-(fdata$distCentromereA+fdata$distCentromereB)/2
 fdata$MeanNeighbACS<-(fdata$NeighbA_ACS+fdata$NeighbB_ACS)/2
@@ -1558,7 +1557,8 @@ ssdwgdclusters<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast
 pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure1A_Domainogram.pdf", height=5, width=7);yeast.genome.plot(chromosomes, ssdwgdclusters, "Duplicate Gene Clusters", "olivedrab", "firebrick4"); legend("bottomright", c("SSD", "WGD"), fill=c("firebrick4", "olivedrab"), bty="n", cex=1.5);dev.off()
 #
 wgdssdreldist<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/WGD_SSD_reldist.tsv", header=T, sep="\t")
-pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure1B_RelDistPlot.pdf", height=5, width=7);par(mar=c(5,5,5,3));plot(wgdssdreldist$reldist, filter(wgdssdreldist$fraction, rep(1/10,10)), type="o", pch=19, lwd=3, col="grey15", las=1, xlab="Relative SSD/WGD Cluster Distance", ylab="", main="Fraction of Relative Distances", cex.main=2, cex.lab=1.5, cex.axis=1.3);abline(h=0.02, lty=3, lwd=3, col="grey15");dev.off()
+randomreldist<-read.delim("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/RandomCluster_reldist.tsv", header=T, sep="\t")
+pdf("~/Dropbox/Articles/Under_Prep/GeneSocializationYeast/ArticleFigures/Figure1B_RelDistPlot.pdf", height=5, width=7);par(mar=c(5,5,5,3));plot(wgdssdreldist$reldist, filter(wgdssdreldist$fraction, rep(1/10,10)), type="o", pch=19, lwd=3, col="grey15", las=1, xlab="Relative Cluster Distance", ylab="", main="Fraction of Relative Distances", cex.main=2, cex.lab=1.5, cex.axis=1.3);lines(randomreldist$reldist, filter(randomreldist$fraction, rep(1/10,10)), type="o", pch=19, lwd=3, col="grey50");abline(h=0.02, lty=3, lwd=3, col="grey15");legend("bottomright", c("WGD/SSD Clusters", "Random Clusters"), col=c("grey15", "grey50"), lwd=3, pch=19, bty="n");dev.off()
 #
 my_comparisons <- list(c("SSD", "WGD"))
 completedata$logdist<-log10(completedata$dist)
