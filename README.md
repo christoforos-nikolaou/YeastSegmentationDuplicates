@@ -22,8 +22,7 @@ Our findings point towards an architectural segregation of function, regulation 
 
 2. Three dimensional coordinates of S. cerevisiae genes. For the three dimensional coordinates we used the published conformational model of the yeast genome [(Duan et al. 2010)](https://www.nature.com/articles/nature08973)⁠ which has been resampled at gene resolution.  We obtained gene positions by linearly interpolating the model’s control points to approximate the center base pair of each gene, which resulted in each gene being represented as a set of three coordinates in arbitrary space. Assuming the mean coordinates of all genes to correspond to the center of the genome in 3D space, we calculated its euclidean distance from each gene and then took quantiles of these distances to assign genes into three sections: **Central**, bottom quartile (lowest 25% of the distances), **Intermediate**, middle half (>25% and <75% of the distances) and **Peripheral**, top quartile (highest 25% of the distances): [sacCer2_3D_gene_coordinates.bed](files/sacCer2_3D_gene_coordinates.bed)  
    
-3. Gene Duplication Events. Gene duplication events were obtained from [Guan et al., 2007](https://academic.oup.com/genetics/article/175/2/933/6061278) as they were further refined by [Fares et al., 2013](https://journals.plos.org/plosgenetics/article?id=10.1371/journal.pgen.1003176). 
-Paralogous pairs of duplicated genes were defined on the basis of best reciprocal hits from all-against-all BLAST-searches using BLASTP (E-value<1E-5, Score>50). Paralogs were further classified as ohnologs resulting from the whole genome duplication occurring in the yeast lineage 100–150 mya according to the reconciled list provided by the YGOB [Yeast Gene Order Browser](http://wolfe.gen.tcd.ie/ygob/). 
+3. Gene Duplication Events. Gene duplication events were obtained from [Guan et al, 2007](https://academic.oup.com/genetics/article/175/2/933/6061278)
    1. Small-scale duplicate (SSD) gene pairs: [SSD.gene.pairs.tsv](files/SSD.gene.pairs.tsv)
    2. Whole-genome duplicate (WGD) gene pairs: [WGD.gene.pairs.tsv](files/WGD.gene.pairs.tsv)
 
@@ -56,10 +55,5 @@ Paralogous pairs of duplicated genes were defined on the basis of best reciproca
     1.  PFAM domains were obtained for each yeast gene and then their number and length ratio in the gene was calculated: [Yeast Genes PFAM Domains](files/YeastGenes_PFAM_Domains.tsv)
     2.  Protein-protein interactions were obtained from [STRING-DB](https://string-db.org/) and the number of interaction for each gene was calculated on the basis of experimental evidence: [Yeast Genes PPI](files/YeastGenes_Number_STRING_PPI.tsv)
 
-11. Yeast Gene Duplicate Comparisons 
-    1.  General comparisons in terms of sequence divergence, co-expression, structural and regulatory similarity, are contained in: [Yeast Duplicate Comparisons](files/Yeast_GeneDuplicates_Comparisons.tsv).
-    2.  A more detailed dataset with a full compilation of many attributes may be found [here]()
 
-## R Code
 
-Accompanying R code may be found in a detailed R-markdown file [here](Supplementary_R_code.rmd)
